@@ -13,17 +13,17 @@ class RangeButton:  # Class du bouton de vitesse de simulation
         
     def display(self):  # Affiche le bouton
         self.update()
-        pygame.draw.circle(fenetre, WHITE if self.is_clicked else LIGHT_GRAY, (self.x, self.y), 8)
+        pygame.draw.circle(window, WHITE if self.is_clicked else LIGHT_GRAY, (self.x, self.y), 8)
         
     def update(self):
         if self.is_clicked:
             if mouse[0] > 0:
                 global simulation_speed
-                simulation_speed = max(1, min(MAX_SPEED, round((mouse[1]-fenetre_size[0]//2+self.range//2)*MAX_SPEED/self.range)))
+                simulation_speed = max(1, min(MAX_SPEED, round((mouse[1]-window_size[0]//2+self.range//2)*MAX_SPEED/self.range)))
                 self.last_mouse_x = pygame.mouse.get_pos()[0]
             else:
                 self.is_clicked = False
-        self.x = fenetre_size[0]//2-self.range//2+round(simulation_speed/MAX_SPEED*self.range)
+        self.x = window_size[0]//2-self.range//2+round(simulation_speed/MAX_SPEED*self.range)
         
     def onMouseClick(self, x, y):  # Clic de la souris
         if (self.x-x)**2+(self.y-y)**2 <= 64:
@@ -35,47 +35,48 @@ class RangeButton:  # Class du bouton de vitesse de simulation
 
 # Définition des fonctions
 
-def countLivingNeighbors(x, y, matrix):  # Retourne le nombre de voisins vivants d'une cellule
-    c = 0
-    for x2 in range(max(x-1, 0), min(x+2, len(matrix[0]))):
-        for y2 in range(max(y-1, 0), min(y+2, len(matrix))):
-            if matrix[y2][x2] and (x != x2 or y != y2):
-                c += 1
-    return c
-
-
 def simulateCells():  # Simule les cellules
-    last = [line.copy() for line in grid]
-    for i in range(len(grid)):
-        for j in range(len(grid[0])):
-            living_neighbors = countLivingNeighbors(j, i, last)
-            if grid[i][j]:
-                grid[i][j] = 2 <= living_neighbors <= 3
-            else:
-                grid[i][j] = living_neighbors == 3
+    neighbors = dict((living_cell, 0) for living_cell in living_cells)
+    for x, y in living_cells:  # On compte le nombre de voisins de chaque cellule en possèdant au moins 1
+        for dx, dy, in NEIGHBORS:
+            try:
+                neighbors[(x+dx, y+dy)] += 1
+            except KeyError:
+                neighbors[(x+dx, y+dy)] = 1
+    
+    for i in range(len(living_cells)-1, -1, -1):  # On tue les cellules vivantes n'ayant pas un nombre de voisins entre 2 et 3
+        if not 2 <= neighbors[living_cells[i]] <= 3:
+            living_cells.pop(i)
+
+    for cell in neighbors:  # On fait naitre les nouvelles cellules qui possèdent 3 voisins
+        if neighbors[cell] == 3 and cell not in living_cells:
+            living_cells.append(cell)
                 
 
 def displayGrid(line_width):  # Affiche la grille
-    for x in range(0, 801, cell_size):
-        pygame.draw.line(fenetre, GRAY, (x, 0), (x, 600), line_width)
-    for y in range(0, 601, cell_size):
-        pygame.draw.line(fenetre, GRAY, (0, y), (800, y), line_width)
+    for x in range(-(scroll_x%cell_size), window_size[0]+1, cell_size):
+        pygame.draw.line(window, GRAY, (x, 0), (x, window_size[1]), line_width)
+    for y in range(-(scroll_y%cell_size), window_size[1]+1, cell_size):
+        pygame.draw.line(window, GRAY, (0, y), (window_size[0], y), line_width)
         
 
 def displayCells():  # Affiche les cellules
-    for i in range(len(grid)):
-        for j in range(len(grid[0])):
-            if grid[i][j]:
-                pygame.draw.rect(fenetre, BLACK, (j*cell_size, i*cell_size, cell_size, cell_size))
+    for i, j in living_cells:
+        pygame.draw.rect(window, BLACK, (j*cell_size-scroll_x, i*cell_size-scroll_y, cell_size, cell_size))
                 
                 
-def onMouseClick(x, y):  # Clic de souris
-    if speed_button.onMouseClick(x, y): return
+def onMouseClick(nb_clicks, x, y):  # Clic de souris
+    global brush
+    if nb_clicks == 1 and speed_button.onMouseClick(x, y): return
     if simulating: return
-    i = y // cell_size
-    j = x // cell_size
-    if 0 <= i < len(grid) and 0 <= j < len(grid[0]):
-        grid[i][j] = not grid[i][j]
+    i = (y+scroll_y) // cell_size
+    j = (x+scroll_x) // cell_size
+    if nb_clicks == 1:
+        brush = (i, j) in living_cells
+    if brush in living_cells:
+        living_cells.remove((i, j))
+    else:
+        living_cells.append((i, j))
         
         
 def greenToRed(percent):  # Renvoie une couleur RGB entre vert et rouge dépendant du pourcentage
@@ -85,11 +86,11 @@ def greenToRed(percent):  # Renvoie une couleur RGB entre vert et rouge dépenda
         
 
 def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
-    pygame.draw.rect(fenetre, BLACK, (fenetre_size[0]//2-210, -40, 420, 110), border_radius=40)
+    pygame.draw.rect(window, BLACK, (window_size[0]//2-210, -40, 420, 110), border_radius=40)
     txt = font.render(f"Vitesse de simulation : {simulation_speed} ticks/s", True, WHITE)
     txt_size = txt.get_size()
-    fenetre.blit(txt, (fenetre_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
-    pygame.draw.rect(fenetre, LIGHT_GRAY, (fenetre_size[0]//2-160, 48, 320, 5), border_radius=2)
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-160, 48, 320, 5), border_radius=2)
     speed_button.display()
             
 
@@ -104,15 +105,16 @@ BLACK = (0, 0, 0)
 
 # Création de la fenêtre et autres
 
-fenetre_size = (800, 600)
-fenetre = pygame.display.set_mode(fenetre_size, pygame.RESIZABLE)
+window_size = (800, 600)
+window = pygame.display.set_mode(window_size, pygame.RESIZABLE)
 pygame.display.set_caption("Conway's Game of Life")
 clock = pygame.time.Clock()
 
 font = pygame.font.SysFont("arial", 24)
 
 cell_size = 40
-grid = [[False]*20 for _ in range(15)]  # Représente la grille de cellules : True = vivante, False = morte
+living_cells = []  # Stocke la liste des coordonnées (x, y) de chaque cellule vivante
+NEIGHBORS = ((-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1))
 simulating = False
 simulation_speed = 5
 MAX_SPEED = 100
@@ -121,6 +123,10 @@ mouse = [0, 0, 0]  # Informations sur la souris : [durée du clique, x, y]
 LOOP_SPEED = 20
 simulation_loop_ticks = 0
 main_loop_ticks = 0
+scroll_x = 0
+scroll_y = 0
+keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT, pygame.K_SPACE))
+brush = False
 
 running = True
 
@@ -142,31 +148,44 @@ while running:
     
     if main_loop_ticks >= MAX_SPEED / LOOP_SPEED:
         main_loop_ticks -= MAX_SPEED / LOOP_SPEED
+
+        for key in keys:
+            if keys[key] > 0:
+                keys[key] += 1
             
         for event in pygame.event.get():  # Boucle d'évènements
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE:
-                    simulating = not simulating
+                if event.key in keys:
+                    keys[event.key] = 1
+            elif event.type == pygame.KEYUP:
+                if event.key in keys:
+                    keys[event.key] = 0
                     
         # Mise à jour des données
+
+        if keys[pygame.K_SPACE] == 1:
+            simulating = not simulating
+
+        scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * 14
+        scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * -14
                     
         mouse[1], mouse[2] = pygame.mouse.get_pos()
         if pygame.mouse.get_pressed()[0]:
             mouse[0] += 1
         else:
             mouse[0] = 0
-        fenetre_size = fenetre.get_size()
+        window_size = window.get_size()
         
-        if mouse[0] == 1:
-            onMouseClick(*mouse[1:3])
+        if mouse[0] > 0:
+            onMouseClick(*mouse)
             
         speed_button.update()
                 
         # Affichage
         
-        fenetre.fill(WHITE)  # Efface l'écran
+        window.fill(WHITE)  # Efface l'écran
         
         if not simulating:
             displayGrid(3)
