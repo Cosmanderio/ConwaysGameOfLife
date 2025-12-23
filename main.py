@@ -54,35 +54,30 @@ def simulateCells():  # Simule les cellules
                 
 
 def displayGrid(line_width):  # Affiche la grille
-    for x in range(-(scroll_x%cell_size), window_size[0]+1, cell_size):
+    for x in range(-((scroll_x-window_size[0]//2)%cell_size), window_size[0]+1, cell_size):
         pygame.draw.line(window, GRAY, (x, 0), (x, window_size[1]), line_width)
-    for y in range(-(scroll_y%cell_size), window_size[1]+1, cell_size):
+    for y in range(-((scroll_y-window_size[1]//2)%cell_size), window_size[1]+1, cell_size):
         pygame.draw.line(window, GRAY, (0, y), (window_size[0], y), line_width)
         
 
 def displayCells():  # Affiche les cellules
     for i, j in living_cells:
-        pygame.draw.rect(window, BLACK, (j*cell_size-scroll_x, i*cell_size-scroll_y, cell_size, cell_size))
+        pygame.draw.rect(window, BLACK, (j*cell_size-scroll_x+window_size[0]//2, i*cell_size-scroll_y+window_size[1]//2, cell_size, cell_size))
                 
                 
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
     global brush
     if nb_clicks == 1 and speed_button.onMouseClick(x, y): return
     if simulating: return
-    i = (y+scroll_y) // cell_size
-    j = (x+scroll_x) // cell_size
+    i = (y+scroll_y-window_size[1]//2) // cell_size
+    j = (x+scroll_x-window_size[0]//2) // cell_size
     if nb_clicks == 1:
         brush = (i, j) in living_cells
-    if brush in living_cells:
-        living_cells.remove((i, j))
-    else:
+    if brush:
+        if (i, j) in living_cells:
+            living_cells.remove((i, j))
+    elif (i, j) not in living_cells:
         living_cells.append((i, j))
-        
-        
-def greenToRed(percent):  # Renvoie une couleur RGB entre vert et rouge dépendant du pourcentage
-    if percent > 50:
-        return (255, 255-round(5.1*(percent-50)), 0)
-    return (round(5.1*percent), 255, 0)
         
 
 def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
@@ -92,6 +87,15 @@ def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
     window.blit(txt, (window_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
     pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-160, 48, 320, 5), border_radius=2)
     speed_button.display()
+    
+    
+def changeCellSize(value):  # Zoom / Dezoom
+    global cell_size, scroll_x, scroll_y
+    real_scroll_x = scroll_x / cell_size
+    real_scroll_y = scroll_y / cell_size
+    cell_size = round(cell_size * 1.1**value)
+    scroll_x = round(real_scroll_x*cell_size)
+    scroll_y = round(real_scroll_y*cell_size)
             
 
 pygame.init()  # Initiation de pygame
@@ -119,18 +123,16 @@ simulating = False
 simulation_speed = 5
 MAX_SPEED = 100
 speed_button = RangeButton(50, 320)
-mouse = [0, 0, 0]  # Informations sur la souris : [durée du clique, x, y]
-LOOP_SPEED = 20
+mouse = [0, 0, 0]  # Informations sur la souris : [durée du clic, x, y]
+LOOP_SPEED = 30
 simulation_loop_ticks = 0
 main_loop_ticks = 0
 scroll_x = 0
 scroll_y = 0
-keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT, pygame.K_SPACE))
+keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT, pygame.K_SPACE, pygame.K_LSHIFT))
 brush = False
 
 running = True
-
-# Boucle principale
 
 while running:
         
@@ -162,14 +164,16 @@ while running:
             elif event.type == pygame.KEYUP:
                 if event.key in keys:
                     keys[event.key] = 0
+            elif event.type == pygame.MOUSEWHEEL:
+                changeCellSize(event.y)
                     
         # Mise à jour des données
 
         if keys[pygame.K_SPACE] == 1:
             simulating = not simulating
 
-        scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * 14
-        scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * -14
+        scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * (30 if keys[pygame.K_LSHIFT] > 0 else 14)
+        scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * (-30 if keys[pygame.K_LSHIFT] > 0 else -14)
                     
         mouse[1], mouse[2] = pygame.mouse.get_pos()
         if pygame.mouse.get_pressed()[0]:
