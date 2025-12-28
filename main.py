@@ -1,6 +1,7 @@
 # Importation des librairies
 
 import pygame
+from json import load, dump
 
 
 class RangeButton:  # Class du bouton de vitesse de simulation
@@ -66,13 +67,22 @@ def displayCells():  # Affiche les cellules
                 
                 
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
-    global brush
-    if nb_clicks == 1 and speed_button.onMouseClick(x, y): return
+    global brush, opening_catalog
+    if nb_clicks == 1 and speed_button.onMouseClick(x, y):
+        return
     if simulating: return
+    if opening_catalog:
+        if mouse[0] == 1 and mouse[2] < window_size[1]-16-catalog_y:
+            opening_catalog = False
+        return
+    elif mouse[0] == 1 and mouse[2] >= window_size[1]-16:
+        opening_catalog = True
+        return
     i = (y+scroll_y-window_size[1]//2) // cell_size
     j = (x+scroll_x-window_size[0]//2) // cell_size
     if nb_clicks == 1:
         brush = (i, j) in living_cells
+    if brush == None: return
     if brush:
         if (i, j) in living_cells:
             living_cells.remove((i, j))
@@ -96,7 +106,39 @@ def changeCellSize(value):  # Zoom / Dezoom
     cell_size = round(cell_size * 1.1**value)
     scroll_x = round(real_scroll_x*cell_size)
     scroll_y = round(real_scroll_y*cell_size)
-            
+    
+    
+def updateCatalog():  # Actualise la position du catalogue
+    global catalog_y
+    if opening_catalog:
+        catalog_y += (window_size[1]-160-catalog_y) // 4
+    else:
+        if 0 < catalog_y < 4:
+            catalog_y -= 1
+        else:
+            catalog_y -= catalog_y // 4
+
+
+def displayCatalog():  # Affiche le catalogue
+    if catalog_y > 0:
+        pygame.draw.rect(window, (140, 170, 220), (0, window_size[1]-16-catalog_y, window_size[0], catalog_y+32), border_radius=16)
+        pygame.draw.rect(window, (160, 190, 225), (8, window_size[1]-catalog_y, window_size[0]-16, catalog_y+16), border_radius=16)
+    else:
+        if mouse[2] < window_size[1]-16:
+            color = (140, 170, 220)
+        else:
+            color = (155, 180, 225)
+        pygame.draw.rect(window, color, (0, window_size[1]-16, window_size[0], 32), border_radius=16)
+    
+# Chargement des données            
+
+try:
+    with open("catalog.json", "r") as f:
+        catalog = load(f)
+except FileNotFoundError:
+    catalog = []
+    with open("catalog.json", "x") as f:
+        dump([], f)
 
 pygame.init()  # Initiation de pygame
 
@@ -129,8 +171,13 @@ simulation_loop_ticks = 0
 main_loop_ticks = 0
 scroll_x = 0
 scroll_y = 0
-keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT, pygame.K_SPACE, pygame.K_LSHIFT))
-brush = False
+keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT,
+                                 pygame.K_SPACE, pygame.K_LSHIFT, pygame.K_z, pygame.K_LCTRL,
+                                 pygame.K_x))
+brush = None
+last_matrix = None
+catalog_y = 0
+opening_catalog = False
 
 running = True
 
@@ -168,9 +215,20 @@ while running:
                 changeCellSize(event.y)
                     
         # Mise à jour des données
+        
+        if keys[pygame.K_z] == 1 and keys[pygame.K_LCTRL] > 0 and last_matrix:
+            simulating = False
+            living_cells = last_matrix.copy()
+            
+        if keys[pygame.K_x] == 1 and keys[pygame.K_LCTRL] > 0:
+            living_cells.clear()
 
         if keys[pygame.K_SPACE] == 1:
             simulating = not simulating
+            if simulating:
+                last_matrix = living_cells.copy()
+                opening_catalog = False
+                catalog_y = 0
 
         scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * (30 if keys[pygame.K_LSHIFT] > 0 else 14)
         scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * (-30 if keys[pygame.K_LSHIFT] > 0 else -14)
@@ -184,8 +242,11 @@ while running:
         
         if mouse[0] > 0:
             onMouseClick(*mouse)
+        else:
+            brush = None
             
         speed_button.update()
+        updateCatalog()
                 
         # Affichage
         
@@ -195,6 +256,8 @@ while running:
             displayGrid(3)
         displayCells()
         displayStats()
+        if not simulating:
+            displayCatalog()
         
         pygame.display.flip() # Actualise l'écran
     
