@@ -2,6 +2,9 @@
 
 import pygame
 from json import load, dump
+from collections import defaultdict
+
+pygame.init()  # Initiation de pygame
 
 
 class RangeButton:  # Class du bouton de vitesse de simulation
@@ -33,25 +36,87 @@ class RangeButton:  # Class du bouton de vitesse de simulation
             return True
         return False
     
+    
+class CatalogItem:  # Class représentant les structures du catalogue
+    
+    SIZE = 140
+    PREVIEW_SIZE = 120
+    INTERVAL = 16
+    max_index = -1
+    FONT = pygame.font.SysFont("arial", 18)
+    
+    def __init__(self, index):
+        self.index = index
+        if index > CatalogItem.max_index:
+            CatalogItem.max_index = index
+        self.structure = catalog[index]
+        self.touching_mouse = False
+        self.rect = pygame.Rect(0, 0, 0, 0)
+        self.preview = pygame.Surface((self.PREVIEW_SIZE, self.PREVIEW_SIZE), pygame.SRCALPHA)
+        self.surface = None
+        self.instant_paste = False
+        self.tick()
+        self.createSurface()
+        self.createPreview()
+        
+    def tick(self):  # Mise à jour des coordonnées et vérification de la collision avec la souris
+        item_per_line = (window_size[0]-self.INTERVAL-16) // (self.SIZE+self.INTERVAL)
+        if (self.index // item_per_line) < (self.max_index // item_per_line):
+            line_width = item_per_line * (self.SIZE+self.INTERVAL) - self.INTERVAL
+        else:
+            line_width = (self.max_index % item_per_line + 1) * (self.SIZE+self.INTERVAL) - self.INTERVAL
+        x = (self.index % item_per_line) * (self.SIZE+self.INTERVAL) + window_size[0]//2 - line_width//2
+        y = (self.index // item_per_line) * (self.SIZE+self.INTERVAL) + (window_size[1]-catalog_y) + self.INTERVAL
+        self.rect = pygame.Rect(x, y, self.SIZE, self.SIZE)
+        self.touching_mouse = self.rect.collidepoint(mouse[1], mouse[2])
+        
+    def display(self):  # Affichage
+        color = ((180, 120, 135) if keys[pygame.K_LCTRL] else (185, 205, 225)) if self.touching_mouse else (175, 200, 230)
+        pygame.draw.rect(window, color, self.rect, border_radius=10)
+        window.blit(self.preview, (self.rect.x+(self.SIZE-self.PREVIEW_SIZE)//2, self.rect.y+(self.SIZE-self.PREVIEW_SIZE)//2))
+        
+    def createSurface(self):  # Création de la surface représentatant la structure
+        if self.structure:
+            x_axis, y_axis = tuple(zip(*self.structure))
+            min_x_axis = min(x_axis)
+            min_y_axis = min(y_axis)
+            width = max(x_axis) - min_x_axis + 1
+            height = max(y_axis) - min_y_axis + 1
+        else:
+            width, height = 0, 0
+        if width*height > 10000:
+            self.instant_paste = True
+        self.surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        for x, y in self.structure:
+            self.surface.set_at((x-min_x_axis, y-min_y_axis), BLACK)
+        
+    def createPreview(self):  # Création de l'aperçu à partir de la surface
+        width, height = self.surface.get_size()
+        if 0 < width and 0 < height:
+            scale = min(self.PREVIEW_SIZE / width, self.PREVIEW_SIZE / height)
+            scaled = pygame.transform.scale_by(self.surface, scale)
+            size = scaled.get_size()
+            self.preview.blit(scaled, (self.PREVIEW_SIZE//2-size[0]//2, self.PREVIEW_SIZE//2-size[1]//2))
+        else:
+            txt = self.FONT.render("Aucun aperçu", True, (100, 125, 145))
+            txt_size = txt.get_size()
+            self.preview.blit(txt, (self.PREVIEW_SIZE//2-txt_size[0]//2, self.PREVIEW_SIZE//2-txt_size[1]//2))
 
 # Définition des fonctions
 
 def simulateCells():  # Simule les cellules
-    neighbors = dict((living_cell, 0) for living_cell in living_cells)
+    neighbors = defaultdict(int)
     for x, y in living_cells:  # On compte le nombre de voisins de chaque cellule en possèdant au moins 1
         for dx, dy, in NEIGHBORS:
-            try:
-                neighbors[(x+dx, y+dy)] += 1
-            except KeyError:
-                neighbors[(x+dx, y+dy)] = 1
+            neighbors[(x+dx, y+dy)] += 1
     
-    for i in range(len(living_cells)-1, -1, -1):  # On tue les cellules vivantes n'ayant pas un nombre de voisins entre 2 et 3
-        if not 2 <= neighbors[living_cells[i]] <= 3:
-            living_cells.pop(i)
+    for cell in living_cells.copy():  # On tue les cellules vivantes n'ayant pas un nombre de voisins entre 2 et 3
+        if not 2 <= neighbors[cell] <= 3:
+            living_cells.remove(cell)
 
     for cell in neighbors:  # On fait naitre les nouvelles cellules qui possèdent 3 voisins
-        if neighbors[cell] == 3 and cell not in living_cells:
-            living_cells.append(cell)
+        if neighbors[cell] == 3:
+            living_cells.add(cell)
                 
 
 def displayGrid(line_width):  # Affiche la grille
@@ -67,27 +132,60 @@ def displayCells():  # Affiche les cellules
                 
                 
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
-    global brush, opening_catalog
+    global brush, opening_catalog, copied_item, copy_rect
     if nb_clicks == 1 and speed_button.onMouseClick(x, y):
         return
     if simulating: return
     if opening_catalog:
         if mouse[0] == 1 and mouse[2] < window_size[1]-16-catalog_y:
             opening_catalog = False
+        elif mouse[0] == 1 and catalog_y > window_size[1]-165:
+            for i in range(len(catalog_items)):
+                catalog_item = catalog_items[i]
+                if catalog_item.touching_mouse:
+                    if keys[pygame.K_LCTRL]:
+                        index = catalog_items.pop(i).index
+                        catalog.pop(index)
+                        CatalogItem.max_index -= 1
+                        for catalog_item_ in catalog_items:
+                            if catalog_item_.index > index:
+                                catalog_item_.index -= 1
+                    else:
+                        if catalog_item.instant_paste:
+                            w, h = catalog_item.surface.get_size()
+                            i = scroll_y // cell_size
+                            j = scroll_x // cell_size
+                            pasteCatalogItem(catalog_item.index, j-w//2, i-h//2)
+                        else:
+                            copied_item = catalog_item
+                        opening_catalog = False
+                    return
         return
     elif mouse[0] == 1 and mouse[2] >= window_size[1]-16:
         opening_catalog = True
         return
     i = (y+scroll_y-window_size[1]//2) // cell_size
     j = (x+scroll_x-window_size[0]//2) // cell_size
+    if copied_item:
+        if nb_clicks == 1:
+            w, h = copied_item.surface.get_size()
+            pasteCatalogItem(copied_item.index, j-w//2, i-h//2)
+            if keys[pygame.K_LSHIFT] == 0:
+                copied_item = None
+        return
     if nb_clicks == 1:
-        brush = (i, j) in living_cells
+        if keys[pygame.K_LSHIFT] > 0:
+            copy_rect = [j, i, 0, 0]
+        else:
+            brush = (i, j) in living_cells
+    elif copy_rect:
+        copy_rect[2] = j-copy_rect[0]
+        copy_rect[3] = i-copy_rect[1]
     if brush == None: return
     if brush:
-        if (i, j) in living_cells:
-            living_cells.remove((i, j))
-    elif (i, j) not in living_cells:
-        living_cells.append((i, j))
+        living_cells.discard((i, j))
+    else:
+        living_cells.add((i, j))
         
 
 def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
@@ -103,7 +201,7 @@ def changeCellSize(value):  # Zoom / Dezoom
     global cell_size, scroll_x, scroll_y
     real_scroll_x = scroll_x / cell_size
     real_scroll_y = scroll_y / cell_size
-    cell_size = round(cell_size * 1.1**value)
+    cell_size = max(2, round(cell_size * 1.1**value))
     scroll_x = round(real_scroll_x*cell_size)
     scroll_y = round(real_scroll_y*cell_size)
     
@@ -117,18 +215,74 @@ def updateCatalog():  # Actualise la position du catalogue
             catalog_y -= 1
         else:
             catalog_y -= catalog_y // 4
+            
+    if catalog_y > 0:
+        for catalog_item in catalog_items:
+            catalog_item.tick()
 
 
 def displayCatalog():  # Affiche le catalogue
     if catalog_y > 0:
         pygame.draw.rect(window, (140, 170, 220), (0, window_size[1]-16-catalog_y, window_size[0], catalog_y+32), border_radius=16)
         pygame.draw.rect(window, (160, 190, 225), (8, window_size[1]-catalog_y, window_size[0]-16, catalog_y+16), border_radius=16)
+        for catalog_item in catalog_items:
+            catalog_item.display()
     else:
         if mouse[2] < window_size[1]-16:
             color = (140, 170, 220)
         else:
             color = (155, 180, 225)
         pygame.draw.rect(window, color, (0, window_size[1]-16, window_size[0], 32), border_radius=16)
+        
+
+def pasteCatalogItem(index, x, y):  # Colle un élément du catalogue sur la grille
+    structure = catalog[index]
+    if not structure:
+        return
+    x_axis, y_axis = tuple(zip(*structure))
+    min_x_axis = min(x_axis)
+    min_y_axis = min(y_axis)
+    for cell_x, cell_y in structure:
+        cell = (cell_y+y-min_y_axis, cell_x+x-min_x_axis)
+        living_cells.add(cell)
+        
+
+def displayCopiedItem():  # Affiche la structure copiée du catalogue
+    if copied_item:
+        surface = pygame.transform.scale_by(copied_item.surface, cell_size)
+        surface.set_alpha(160)
+        w, h = copied_item.surface.get_size()
+        x = ((mouse[1]+scroll_x-window_size[0]//2) // cell_size - w//2) * cell_size - scroll_x + window_size[0]//2
+        y = ((mouse[2]+scroll_y-window_size[1]//2) // cell_size - h//2) * cell_size - scroll_y + window_size[1]//2
+        window.blit(surface, (x, y))
+        
+
+def absRect(rect):  # Retourne le rectangle avec une taille positive
+    rect = rect.copy()
+    if rect[2] < 0:
+        rect[0] += rect[2]
+        rect[2] = -rect[2]
+    if rect[3] < 0:
+        rect[1] += rect[3]
+        rect[3] = -rect[3]
+    return rect
+        
+        
+def addToCatalog(copy_rect):  # Ajoute la zone sélectionnée au catalogue
+    global save_catalog
+    save_catalog = True
+    rect = absRect(copy_rect)
+    cells = [[x-rect[0], y-rect[1]] for x in range(rect[0], rect[0]+rect[2]+1) for y in range(rect[1], rect[1]+rect[3]+1) if (y, x) in living_cells]
+    catalog.append(cells)
+    catalog_items.append(CatalogItem(len(catalog)-1))
+    
+    
+def displayCopyRect():  # Affiche le rectangle de sélection
+    rect = absRect(copy_rect)
+    surface = pygame.Surface(((rect[2]+1)*cell_size, (rect[3]+1)*cell_size), pygame.SRCALPHA)
+    surface.fill(GREEN)
+    surface.set_alpha(120)
+    window.blit(surface, (window_size[0]//2-scroll_x+rect[0]*cell_size, window_size[1]//2-scroll_y+rect[1]*cell_size))
     
 # Chargement des données            
 
@@ -140,18 +294,18 @@ except FileNotFoundError:
     with open("catalog.json", "x") as f:
         dump([], f)
 
-pygame.init()  # Initiation de pygame
-
 # Définition des couleurs
 
 WHITE = (255, 255, 255)
 LIGHT_GRAY = (220, 220, 220)
 GRAY = (128, 128, 128)
 BLACK = (0, 0, 0)
+GREEN = (0, 255, 0)
 
 # Création de la fenêtre et autres
 
 window_size = (800, 600)
+MIN_SIZE = (400, 300)
 window = pygame.display.set_mode(window_size, pygame.RESIZABLE)
 pygame.display.set_caption("Conway's Game of Life")
 clock = pygame.time.Clock()
@@ -159,7 +313,7 @@ clock = pygame.time.Clock()
 font = pygame.font.SysFont("arial", 24)
 
 cell_size = 40
-living_cells = []  # Stocke la liste des coordonnées (x, y) de chaque cellule vivante
+living_cells = set()  # Stocke la liste des coordonnées (x, y) de chaque cellule vivante
 NEIGHBORS = ((-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1))
 simulating = False
 simulation_speed = 5
@@ -178,6 +332,12 @@ brush = None
 last_matrix = None
 catalog_y = 0
 opening_catalog = False
+catalog_items = []
+copied_item = None
+for i in range(len(catalog)):
+    catalog_items.append(CatalogItem(i))
+copy_rect = None
+save_catalog = False
 
 running = True
 
@@ -213,6 +373,9 @@ while running:
                     keys[event.key] = 0
             elif event.type == pygame.MOUSEWHEEL:
                 changeCellSize(event.y)
+            elif event.type == pygame.VIDEORESIZE:
+                if event.size[0] < MIN_SIZE[0] or event.size[1] < MIN_SIZE[1]:
+                    window = pygame.display.set_mode((max(event.size[0], MIN_SIZE[0]), max(event.size[1], MIN_SIZE[1])), pygame.RESIZABLE)
                     
         # Mise à jour des données
         
@@ -229,6 +392,8 @@ while running:
                 last_matrix = living_cells.copy()
                 opening_catalog = False
                 catalog_y = 0
+                copied_item = None
+                copy_rect = None
 
         scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * (30 if keys[pygame.K_LSHIFT] > 0 else 14)
         scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * (-30 if keys[pygame.K_LSHIFT] > 0 else -14)
@@ -244,6 +409,9 @@ while running:
             onMouseClick(*mouse)
         else:
             brush = None
+            if copy_rect:
+                addToCatalog(copy_rect)
+                copy_rect = None
             
         speed_button.update()
         updateCatalog()
@@ -253,8 +421,11 @@ while running:
         window.fill(WHITE)  # Efface l'écran
         
         if not simulating:
-            displayGrid(3)
+            displayGrid(cell_size//15+1)
         displayCells()
+        if copy_rect and not simulating:
+            displayCopyRect()    
+        displayCopiedItem()
         displayStats()
         if not simulating:
             displayCatalog()
@@ -264,3 +435,7 @@ while running:
     clock.tick(MAX_SPEED)  # Limite la boucle à 'MAX_SPEED' ticks / seconde
 
 pygame.quit()  # Fermeture de la fenêtre
+
+if save_catalog:
+    with open("catalog.json", "w") as f:
+        dump(catalog, f, indent=4)
