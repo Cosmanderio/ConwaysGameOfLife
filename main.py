@@ -105,19 +105,39 @@ class CatalogItem:  # Class représentant les structures du catalogue
 # Définition des fonctions
 
 def simulateCells():  # Simule les cellules
-    neighbors = defaultdict(int)
-    for x, y in living_cells:  # On compte le nombre de voisins de chaque cellule en possèdant au moins 1
-        for dx, dy, in NEIGHBORS:
-            neighbors[(x+dx, y+dy)] += 1
+    global init_simulation
+    if init_simulation:
+        neighbors.clear()
+        for y, x in living_cells:  # On compte le nombre de voisins de chaque cellule en possèdant au moins 1
+            for dx, dy in NEIGHBORS:
+                neighbors[y+dy, x+dx] += 1
+        init_simulation = False
+        
+    to_kill = []
+    to_birth = []
     
-    for cell in living_cells.copy():  # On tue les cellules vivantes n'ayant pas un nombre de voisins entre 2 et 3
-        if not 2 <= neighbors[cell] <= 3:
-            living_cells.remove(cell)
+    for cell in living_cells:  # On retient les cellules vivantes n'ayant pas un nombre de voisins entre 2 et 3
+        if not 1 < neighbors.get(cell, 0) < 4:
+            to_kill.append(cell)
 
-    for cell in neighbors:  # On fait naitre les nouvelles cellules qui possèdent 3 voisins
-        if neighbors[cell] == 3:
-            living_cells.add(cell)
-                
+    for cell, n in neighbors.items():  # On retient les cellules mortes qui possèdent 3 voisins
+        if n == 3 and cell not in living_cells:
+            to_birth.append(cell)
+    
+    for y, x in to_birth:  # On fait naitre les cellules
+        living_cells.add((y, x))
+        for dx, dy in NEIGHBORS:
+            neighbors[y+dy, x+dx] += 1
+     
+    for y, x in to_kill:  # On tue les cellules
+        living_cells.discard((y, x))
+        for dx, dy in NEIGHBORS:
+            count = neighbors[y+dy, x+dx] - 1
+            if count:
+                neighbors[y+dy, x+dx] = count
+            else:
+                del neighbors[y+dy, x+dx]
+
 
 def displayGrid(line_width):  # Affiche la grille
     for x in range(-((scroll_x-window_size[0]//2)%cell_size), window_size[0]+1, cell_size):
@@ -283,7 +303,7 @@ def displayCopyRect():  # Affiche le rectangle de sélection
     surface.fill(GREEN)
     surface.set_alpha(120)
     window.blit(surface, (window_size[0]//2-scroll_x+rect[0]*cell_size, window_size[1]//2-scroll_y+rect[1]*cell_size))
-    
+  
 # Chargement des données            
 
 try:
@@ -313,8 +333,10 @@ clock = pygame.time.Clock()
 font = pygame.font.SysFont("arial", 24)
 
 cell_size = 40
-living_cells = set()  # Stocke la liste des coordonnées (x, y) de chaque cellule vivante
+living_cells = set()  # Stocke la liste des coordonnées (y, x) de chaque cellule vivante
 NEIGHBORS = ((-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1))
+neighbors = defaultdict(int)
+init_simulation = True
 simulating = False
 simulation_speed = 5
 MAX_SPEED = 100
@@ -385,6 +407,7 @@ while running:
             
         if keys[pygame.K_x] == 1 and keys[pygame.K_LCTRL] > 0:
             living_cells.clear()
+            neighbors.clear()
 
         if keys[pygame.K_SPACE] == 1:
             simulating = not simulating
@@ -394,6 +417,7 @@ while running:
                 catalog_y = 0
                 copied_item = None
                 copy_rect = None
+                init_simulation = True
 
         scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * (30 if keys[pygame.K_LSHIFT] > 0 else 14)
         scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * (-30 if keys[pygame.K_LSHIFT] > 0 else -14)
