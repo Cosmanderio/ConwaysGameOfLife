@@ -1,3 +1,20 @@
+"""
+Ce programme est une simulation du jeu de la vie de Conway.
+
+- Clic gauche pour changer l'état d'une cellule
+- Espace pour lancer/arrêter la simulation
+- Molette de souris ou défilement à 2 doigts pour zoomer/dézoomer
+- Flèches directionnelles pour se déplacer sur la grille
+- Shift + flèches pour aller plus vite
+- Ctrl + Z durant pour revenir à l'état précédent de la grille
+- Ctrl + X pour vider la grille
+- Shift + sélectionner une zone avec la souris pour ajouter une structure au catalogue
+- Ctrl + clic pour supprimer un élément du catalogue
+
+Pour rajouter des structures au catalogue depuis internet, télécharger un fichier RLE sur un site (exemple : https://conwaylife.appspot.com/library)
+et exécuter le script 'rle2json.py' en fournissant le chemin du fichier RLE quand demandé.
+"""
+
 # Importation des librairies
 
 import pygame
