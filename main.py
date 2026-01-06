@@ -103,6 +103,8 @@ class CatalogItem:  # Class représentant les structures du catalogue
             width, height = 0, 0
         if width*height > 10000:
             self.instant_paste = True
+            if width*height > 10000000:
+                width, height = 0, 0
         self.surface = pygame.Surface((width, height), pygame.SRCALPHA)
         for x, y in self.structure:
             self.surface.set_at((x-min_x_axis, y-min_y_axis), BLACK)
@@ -238,7 +240,7 @@ def changeCellSize(value):  # Zoom / Dezoom
     global cell_size, scroll_x, scroll_y
     real_scroll_x = scroll_x / cell_size
     real_scroll_y = scroll_y / cell_size
-    cell_size = max(2, round(cell_size * 1.1**value))
+    cell_size = max(1, round(cell_size * 1.2**value))
     scroll_x = round(real_scroll_x*cell_size)
     scroll_y = round(real_scroll_y*cell_size)
     
@@ -461,7 +463,7 @@ while running:
         
         window.fill(WHITE)  # Efface l'écran
         
-        if not simulating:
+        if not simulating and cell_size > 2:
             displayGrid(cell_size//15+1)
         displayCells()
         if copy_rect and not simulating:
