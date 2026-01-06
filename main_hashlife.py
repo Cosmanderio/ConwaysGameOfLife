@@ -1,0 +1,696 @@
+"""
+Ce programme est une simulation du jeu de la vie de Conway.
+Cette version utilise l'algorithme Hashlife pour compresser l'espace et le temps lors de la simulation.
+Lien vers l'article utilisé pour implémenter le Hashlife : https://www.dev-mind.blog/hashlife
+
+- Clic gauche pour changer l'état d'une cellule
+- Espace pour lancer/arrêter la simulation
+- Molette de souris ou défilement à 2 doigts pour zoomer/dézoomer
+- Flèches directionnelles pour se déplacer sur la grille
+- Shift + flèches pour aller plus vite
+- Ctrl + Z durant pour revenir à l'état précédent de la grille
+- Ctrl + X pour vider la grille
+- Shift + sélectionner une zone avec la souris pour ajouter une structure au catalogue
+- Ctrl + clic pour supprimer un élément du catalogue
+- Ctrl + C pour vider le cache et libérer de la mémoire vive
+
+Pour rajouter des structures au catalogue depuis internet, télécharger un fichier RLE sur un site (exemple : https://conwaylife.appspot.com/library)
+et exécuter le script 'rle2json.py' en fournissant le chemin du fichier RLE quand demandé.
+"""
+
+# Importation des librairies
+
+import pygame
+from json import load, dump
+
+pygame.init()  # Initiation de pygame
+
+
+class RangeButton:  # Class du bouton de vitesse de simulation
+    
+    def __init__(self, y, button_range):
+        self.is_clicked = False
+        self.range = button_range
+        self.x = 0
+        self.y = y
+        
+    def display(self):  # Affiche le bouton
+        self.update()
+        pygame.draw.circle(window, WHITE if self.is_clicked else LIGHT_GRAY, (self.x, self.y), 8)
+        
+    def update(self):
+        if self.is_clicked:
+            if mouse[0] > 0:
+                global simulation_speed
+                simulation_speed = max(1, min(MAX_SPEED, round((mouse[1]-window_size[0]//2+self.range//2)*MAX_SPEED/self.range)))
+                self.last_mouse_x = pygame.mouse.get_pos()[0]
+            else:
+                self.is_clicked = False
+        self.x = window_size[0]//2-self.range//2+round(simulation_speed/MAX_SPEED*self.range)
+        
+    def onMouseClick(self, x, y):  # Clic de la souris
+        if (self.x-x)**2+(self.y-y)**2 <= 64:
+            self.is_clicked = True
+            self.last_mouse_x = x
+            return True
+        return False
+    
+    
+class CatalogItem:  # Class représentant les structures du catalogue
+    
+    SIZE = 140
+    PREVIEW_SIZE = 120
+    INTERVAL = 16
+    max_index = -1
+    FONT = pygame.font.SysFont("arial", 18)
+    
+    def __init__(self, index):
+        self.index = index
+        if index > CatalogItem.max_index:
+            CatalogItem.max_index = index
+        self.structure = catalog[index]
+        self.touching_mouse = False
+        self.rect = pygame.Rect(0, 0, 0, 0)
+        self.preview = pygame.Surface((self.PREVIEW_SIZE, self.PREVIEW_SIZE), pygame.SRCALPHA)
+        self.surface = None
+        self.instant_paste = False
+        self.tick()
+        self.createSurface()
+        self.createPreview()
+        
+    def tick(self):  # Mise à jour des coordonnées et vérification de la collision avec la souris
+        item_per_line = (window_size[0]-self.INTERVAL-16) // (self.SIZE+self.INTERVAL)
+        if (self.index // item_per_line) < (self.max_index // item_per_line):
+            line_width = item_per_line * (self.SIZE+self.INTERVAL) - self.INTERVAL
+        else:
+            line_width = (self.max_index % item_per_line + 1) * (self.SIZE+self.INTERVAL) - self.INTERVAL
+        x = (self.index % item_per_line) * (self.SIZE+self.INTERVAL) + window_size[0]//2 - line_width//2
+        y = (self.index // item_per_line) * (self.SIZE+self.INTERVAL) + (window_size[1]-catalog_y) + self.INTERVAL
+        self.rect = pygame.Rect(x, y, self.SIZE, self.SIZE)
+        self.touching_mouse = self.rect.collidepoint(mouse[1], mouse[2])
+        
+    def display(self):  # Affichage
+        color = ((180, 120, 135) if keys[pygame.K_LCTRL] else (185, 205, 225)) if self.touching_mouse else (175, 200, 230)
+        pygame.draw.rect(window, color, self.rect, border_radius=10)
+        window.blit(self.preview, (self.rect.x+(self.SIZE-self.PREVIEW_SIZE)//2, self.rect.y+(self.SIZE-self.PREVIEW_SIZE)//2))
+        
+    def createSurface(self):  # Création de la surface représentatant la structure
+        if self.structure:
+            x_axis, y_axis = tuple(zip(*self.structure))
+            min_x_axis = min(x_axis)
+            min_y_axis = min(y_axis)
+            width = max(x_axis) - min_x_axis + 1
+            height = max(y_axis) - min_y_axis + 1
+        else:
+            width, height = 0, 0
+        if width*height > 10000:
+            self.instant_paste = True
+            if width*height > 10000000:
+                width, height = 0, 0
+        self.surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        for x, y in self.structure:
+            self.surface.set_at((x-min_x_axis, y-min_y_axis), BLACK)
+        
+    def createPreview(self):  # Création de l'aperçu à partir de la surface
+        width, height = self.surface.get_size()
+        if 0 < width and 0 < height:
+            scale = min(self.PREVIEW_SIZE / width, self.PREVIEW_SIZE / height)
+            scaled = pygame.transform.scale_by(self.surface, scale)
+            size = scaled.get_size()
+            self.preview.blit(scaled, (self.PREVIEW_SIZE//2-size[0]//2, self.PREVIEW_SIZE//2-size[1]//2))
+        else:
+            txt = self.FONT.render("Aucun aperçu", True, (100, 125, 145))
+            txt_size = txt.get_size()
+            self.preview.blit(txt, (self.PREVIEW_SIZE//2-txt_size[0]//2, self.PREVIEW_SIZE//2-txt_size[1]//2))
+            
+            
+class Node:
+    
+    __slots__ = ('depth', 'a', 'b', 'c', 'd')
+    
+    def __init__(self, depth, a, b, c, d):
+        self.depth = depth
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+            
+    def evolve(self):  # Fonction de simulation utilisant l'algorithme Hashlife pour compresser l'espace et le temps
+        
+        cached = cache.get(self)  # Si la node a déjà été calculée au moins 1 fois, on réutilise le résultat enregistré
+        if cached != None:
+           return cached
+        
+        if self.depth == 2:  # Simulation classique pour les plus petites nodes (4x4)
+            an = self.a.a + self.a.b + self.a.c + self.b.a + self.b.c + self.c.a + self.c.b + self.d.a
+            bn = self.a.b + self.b.a + self.a.d + self.c.b + self.d.a + self.b.b + self.b.d + self.d.b
+            cn = self.a.c + self.a.d + self.b.c + self.c.a + self.c.c + self.c.d + self.d.a + self.d.c
+            dn = self.a.d + self.b.c + self.b.d + self.c.b + self.c.d + self.d.b + self.d.c + self.d.d
+            a = 1 < an < 4 if self.a.d else an == 3
+            b = 1 < bn < 4 if self.b.c else bn == 3
+            c = 1 < cn < 4 if self.c.b else cn == 3
+            d = 1 < dn < 4 if self.d.a else dn == 3
+            result = newNode(1, a, b, c, d)
+            cache[self] = result
+            return result
+        
+        node1 = self.a
+        node2 = newNode(self.depth-1, self.a.b, self.b.a, self.a.d, self.b.c)
+        node3 = self.b
+        node4 = newNode(self.depth-1, self.a.c, self.a.d, self.c.a, self.c.b)
+        node5 = self.getCenterNode()
+        node6 = newNode(self.depth-1, self.b.c, self.b.d, self.d.a, self.d.b)
+        node7 = self.c
+        node8 = newNode(self.depth-1, self.c.b, self.d.a, self.c.d, self.d.c)
+        node9 = self.d
+        
+        node1Res = node1.evolve()
+        node2Res = node2.evolve()
+        node3Res = node3.evolve()
+        node4Res = node4.evolve()
+        node5Res = node5.evolve()
+        node6Res = node6.evolve()
+        node7Res = node7.evolve()
+        node8Res = node8.evolve()
+        node9Res = node9.evolve()
+        
+        intermediateNode1 = newNode(self.depth-1, node1Res, node2Res, node4Res, node5Res)
+        intermediateNode2 = newNode(self.depth-1, node2Res, node3Res, node5Res, node6Res)
+        intermediateNode3 = newNode(self.depth-1, node4Res, node5Res, node7Res, node8Res)
+        intermediateNode4 = newNode(self.depth-1, node5Res, node6Res, node8Res, node9Res)
+        
+        if self.depth-3 < temporal_compression_level or temporal_compression_level == -1:
+            result = newNode(self.depth-1,
+                        intermediateNode1.evolve(),
+                        intermediateNode2.evolve(),
+                        intermediateNode3.evolve(),
+                        intermediateNode4.evolve()
+                        )
+        else:
+            result = newNode(self.depth-1,
+                        intermediateNode1.getCenterNode(),
+                        intermediateNode2.getCenterNode(),
+                        intermediateNode3.getCenterNode(),
+                        intermediateNode4.getCenterNode()
+                        )
+        
+        cache[self] = result  # On stocke le résultat dans le cache pour la prochaine fois
+        return result
+        
+    def getCenterNode(self):  # Retourne la node centrale de celle-ci, centrée et 2 fois plus petite
+        return newNode(self.depth-1, self.a.d, self.b.c, self.c.b, self.d.a)
+    
+    def getLivingCells(self):  # Renvoie chaque cellule vivante dans la node sous forme de coordonnées relatives à la node
+        cached = draw_cache.get(self)  # On utilise un cache pour obtenir le résultat de la fonction s'il a déjà été calculé
+        if cached != None:
+            return cached
+        
+        if self.depth == 1:
+            result = set((x, y) for x, y, cell in self.getSubNodes() if cell)
+            draw_cache[self] = result
+            return result
+        
+        result = set()
+        for dx, dy, node in self.getSubNodes():
+            for x, y in node.getLivingCells():
+                result.add((x+dx, y+dy))
+        
+        draw_cache[self] = result
+        return result
+    
+    def getSubNodes(self):  # Retourne la position relative de chaque sous-node et celle-ci
+        half = 2**(self.depth-1)
+        yield 0, 0, self.a
+        yield half, 0, self.b
+        yield 0, half, self.c
+        yield half, half, self.d
+        
+    def getSubNodeFromXY(self, dx, dy):  # Retourne la sous-node correspondante à dx, dy
+        match dx, dy:
+            case 0, 0: return self.a
+            case 1, 0: return self.b
+            case 0, 1: return self.c
+            case 1, 1: return self.d
+        raise ValueError
+        
+    def setCell(self, x, y, cx, cy, value):  # Renvoie une nouvelle node de la même taille avec la cellule modifiée
+        
+        cached = edit_cache.get((self, cx-x, cy-y, value))
+        if cached != None:
+            return cached
+        
+        if self.depth == 1:
+            result = newNode(1, *(value if x+dx == cx and y+dy == cy else cell for dx, dy, cell in self.getSubNodes()))
+            edit_cache[(self, cx-x, cy-y, value)] = result
+            return result
+
+        half = 2**(self.depth-1)
+        result = newNode(self.depth, *(node.setCell(x+dx, y+dy, cx, cy, value)
+                                     if x+dx <= cx < x+dx+half and y+dy <= cy < y+dy+half else node
+                                     for dx, dy, node in self.getSubNodes()
+                                     )
+                       )
+        edit_cache[(self, cx-x, cy-y, value)] = result
+        return result
+    
+    def isLiving(self, x, y, cx, cy):  # Retourne True si la cellule en cx, cy est vivante sinon False 
+        if self.depth == 1:
+            return self.getSubNodeFromXY(cx-x, cy-y)
+        half = 2**(self.depth-1)
+        for dx, dy, node in self.getSubNodes():
+            if x+dx <= cx < x+dx+half and y+dy <= cy < y+dy+half:
+                return node.isLiving(x+dx, y+dy, cx, cy)
+        return False
+        
+    def __hash__(self):
+        return hash((id(self.a), id(self.b), id(self.c), id(self.d)))
+    
+    def __eq__(self, node):
+        if not isinstance(node, Node): return False
+        return id(self.a) == id(node.a) and id(self.b) == id(node.b) and id(self.c) == id(node.c) and id(self.d) == id(node.d)
+
+    def __ne__(self, node):
+        return not self.__eq__(node)
+    
+    def __repr__(self):
+        if self.depth == 1:
+            return f"Node 1x1 a={self.a} b={self.b} c={self.c} d={self.d}"
+        return f"Node {2**self.depth}x{2**self.depth} depth={self.depth}"
+             
+
+# Définition des fonctions
+
+def newNode(depth, a=None, b=None, c=None, d=None):  # Vérifie si une node avec les mêmes propriétés existe et la retourne, sinon en créé une nouvelle
+    if a == None:
+        if depth == 1:
+            a = False
+            b = False
+            c = False
+            d = False
+        else:
+            node = newNode(depth-1)
+            a = node
+            b = node
+            c = node
+            d = node
+    key = (a, b, c, d)
+    node = known_nodes.get(key)
+    if node == None:
+        node = Node(depth, a, b, c, d)
+        known_nodes[key] = node
+    return node
+
+
+def updateRootSize(default_x=0, default_y=0):  # Met à jour la taille de la node racine
+    global root, root_x, root_y, root_depth
+    min_x, max_x = min(default_x, 0), max(default_x, 0)
+    min_y, max_y, = min(default_y, 0), max(default_y, 0)
+    for x, y in root.getLivingCells():
+        x += root_x
+        y += root_y
+        if min_x > x:
+            min_x = x
+        if max_x < x:
+            max_x = x
+        if min_y > y:
+            min_y = y
+        if max_y < y:
+            max_y = y
+    
+    width = max_x - min_x + 1
+    heigth = max_y - min_y + 1
+    
+    while width > 2**(root_depth-3) or heigth > 2**(root_depth-3):
+        draw_cache.clear()
+        root_depth += 1
+        empty_node = newNode(root_depth-2)
+        root = newNode(root_depth,
+                    newNode(root_depth-1, empty_node, empty_node, empty_node, root.a),
+                    newNode(root_depth-1, empty_node, empty_node, root.b, empty_node),
+                    newNode(root_depth-1, empty_node, root.c, empty_node, empty_node),
+                    newNode(root_depth-1, root.d, empty_node, empty_node, empty_node)
+                    )
+    root_x = - 2**(root_depth-1)
+    root_y = - 2**(root_depth-1)
+
+
+def simulateCells():  # Simule les cellules à partir de la node racine
+    global root
+    updateRootSize()
+    new_root = root.evolve()
+    root = newNode(root.depth,
+                   newNode(root.depth-1, root.a.a, root.a.b, root.a.c, new_root.a),
+                   newNode(root.depth-1, root.b.a, root.b.b, new_root.b, root.b.d),
+                   newNode(root.depth-1, root.c.a, new_root.c, root.c.c, root.c.d),
+                   newNode(root.depth-1, new_root.d, root.d.b, root.d.c, root.d.d)
+    )
+
+
+def displayGrid(line_width):  # Affiche la grille
+    for x in range(-((scroll_x-window_size[0]//2)%cell_size), window_size[0]+1, cell_size):
+        pygame.draw.line(window, GRAY, (x, 0), (x, window_size[1]), line_width)
+    for y in range(-((scroll_y-window_size[1]//2)%cell_size), window_size[1]+1, cell_size):
+        pygame.draw.line(window, GRAY, (0, y), (window_size[0], y), line_width)
+        
+
+def displayCells():  # Affiche les cellules
+    bx = window_size[0]//2-scroll_x
+    by = window_size[1]//2-scroll_y
+    for x, y in root.getLivingCells():
+        pygame.draw.rect(window, BLACK, ((x+root_x)*cell_size+bx, (y+root_y)*cell_size+by, cell_size, cell_size))
+                
+def onMouseClick(nb_clicks, x, y):  # Clic de souris
+    global brush, opening_catalog, copied_item, copy_rect
+    if nb_clicks == 1 and speed_button.onMouseClick(x, y):
+        return
+    if simulating: return
+    if opening_catalog:
+        if mouse[0] == 1 and mouse[2] < window_size[1]-16-catalog_y:
+            opening_catalog = False
+        elif mouse[0] == 1 and catalog_y > window_size[1]-165:
+            for i in range(len(catalog_items)):
+                catalog_item = catalog_items[i]
+                if catalog_item.touching_mouse:
+                    if keys[pygame.K_LCTRL]:
+                        index = catalog_items.pop(i).index
+                        catalog.pop(index)
+                        CatalogItem.max_index -= 1
+                        for catalog_item_ in catalog_items:
+                            if catalog_item_.index > index:
+                                catalog_item_.index -= 1
+                    else:
+                        if catalog_item.instant_paste:
+                            w, h = catalog_item.surface.get_size()
+                            i = scroll_y // cell_size
+                            j = scroll_x // cell_size
+                            pasteCatalogItem(catalog_item.index, j-w//2, i-h//2)
+                        else:
+                            copied_item = catalog_item
+                        opening_catalog = False
+                    return
+        return
+    elif mouse[0] == 1 and mouse[2] >= window_size[1]-16:
+        opening_catalog = True
+        return
+    i = (y+scroll_y-window_size[1]//2) // cell_size
+    j = (x+scroll_x-window_size[0]//2) // cell_size
+    if copied_item:
+        if nb_clicks == 1:
+            w, h = copied_item.surface.get_size()
+            pasteCatalogItem(copied_item.index, j-w//2, i-h//2)
+            if keys[pygame.K_LSHIFT] == 0:
+                copied_item = None
+        return
+    if nb_clicks == 1:
+        if keys[pygame.K_LSHIFT] > 0:
+            copy_rect = [j, i, 0, 0]
+        else:
+            brush = root.isLiving(root_x, root_y, j, i)
+    elif copy_rect:
+        copy_rect[2] = j-copy_rect[0]
+        copy_rect[3] = i-copy_rect[1]
+    if brush == None: return
+    setCell(j, i, not brush)
+        
+
+def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
+    pygame.draw.rect(window, BLACK, (window_size[0]//2-210, -40, 420, 110), border_radius=40)
+    txt = font.render(f"Vitesse de simulation : {simulation_speed} ticks/s", True, WHITE)
+    txt_size = txt.get_size()
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-160, 48, 320, 5), border_radius=2)
+    speed_button.display()
+    
+
+def setCell(x, y, value, check_size=True):  # Affecte une valeur à une cellule
+    global root
+    if check_size:
+        updateRootSize(x, y)
+    root = root.setCell(root_x, root_y, x, y, value)
+    
+def changeCellSize(value):  # Zoom / Dezoom
+    global cell_size, scroll_x, scroll_y
+    real_scroll_x = scroll_x / cell_size
+    real_scroll_y = scroll_y / cell_size
+    cell_size = max(1, round(cell_size * 1.2**value))
+    scroll_x = round(real_scroll_x*cell_size)
+    scroll_y = round(real_scroll_y*cell_size)
+    
+    
+def updateCatalog():  # Actualise la position du catalogue
+    global catalog_y
+    if opening_catalog:
+        catalog_y += (window_size[1]-160-catalog_y) // 4
+    else:
+        if 0 < catalog_y < 4:
+            catalog_y -= 1
+        else:
+            catalog_y -= catalog_y // 4
+            
+    if catalog_y > 0:
+        for catalog_item in catalog_items:
+            catalog_item.tick()
+
+
+def displayCatalog():  # Affiche le catalogue
+    if catalog_y > 0:
+        pygame.draw.rect(window, (140, 170, 220), (0, window_size[1]-16-catalog_y, window_size[0], catalog_y+32), border_radius=16)
+        pygame.draw.rect(window, (160, 190, 225), (8, window_size[1]-catalog_y, window_size[0]-16, catalog_y+16), border_radius=16)
+        for catalog_item in catalog_items:
+            catalog_item.display()
+    else:
+        if mouse[2] < window_size[1]-16:
+            color = (140, 170, 220)
+        else:
+            color = (155, 180, 225)
+        pygame.draw.rect(window, color, (0, window_size[1]-16, window_size[0], 32), border_radius=16)
+        
+
+def pasteCatalogItem(index, x, y):  # Colle un élément du catalogue sur la grille
+    structure = catalog[index]
+    if not structure:
+        return
+    x_axis, y_axis = tuple(zip(*structure))
+    min_x_axis = min(x_axis)
+    min_y_axis = min(y_axis)
+    max_x = max(abs(cell_x+x-min_x_axis) for cell_x, _ in structure)
+    max_y = max(abs(cell_y+y-min_y_axis) for _, cell_y in structure)
+    updateRootSize(max_x, max_y)
+    for cell_x, cell_y in structure:
+        setCell(cell_x+x-min_x_axis, cell_y+y-min_y_axis, True, False)
+        
+
+def displayCopiedItem():  # Affiche la structure copiée du catalogue
+    if copied_item:
+        surface = pygame.transform.scale_by(copied_item.surface, cell_size)
+        surface.set_alpha(160)
+        w, h = copied_item.surface.get_size()
+        x = ((mouse[1]+scroll_x-window_size[0]//2) // cell_size - w//2) * cell_size - scroll_x + window_size[0]//2
+        y = ((mouse[2]+scroll_y-window_size[1]//2) // cell_size - h//2) * cell_size - scroll_y + window_size[1]//2
+        window.blit(surface, (x, y))
+        
+
+def absRect(rect):  # Retourne le rectangle avec une taille positive
+    rect = rect.copy()
+    if rect[2] < 0:
+        rect[0] += rect[2]
+        rect[2] = -rect[2]
+    if rect[3] < 0:
+        rect[1] += rect[3]
+        rect[3] = -rect[3]
+    return rect
+        
+        
+def addToCatalog(copy_rect):  # Ajoute la zone sélectionnée au catalogue
+    global save_catalog
+    save_catalog = True
+    rect = absRect(copy_rect)
+    cells = [[x-rect[0], y-rect[1]] for x in range(rect[0], rect[0]+rect[2]+1) for y in range(rect[1], rect[1]+rect[3]+1) if root.isLiving(root_x, root_y, x, y)]
+    catalog.append(cells)
+    catalog_items.append(CatalogItem(len(catalog)-1))
+    
+    
+def displayCopyRect():  # Affiche le rectangle de sélection
+    rect = absRect(copy_rect)
+    surface = pygame.Surface(((rect[2]+1)*cell_size, (rect[3]+1)*cell_size), pygame.SRCALPHA)
+    surface.fill(GREEN)
+    surface.set_alpha(120)
+    window.blit(surface, (window_size[0]//2-scroll_x+rect[0]*cell_size, window_size[1]//2-scroll_y+rect[1]*cell_size))
+  
+# Chargement des données            
+
+try:
+    with open("catalog.json", "r") as f:
+        catalog = load(f)
+except FileNotFoundError:
+    catalog = []
+    with open("catalog.json", "x") as f:
+        dump([], f)
+
+# Définition des couleurs
+
+WHITE = (255, 255, 255)
+LIGHT_GRAY = (220, 220, 220)
+GRAY = (128, 128, 128)
+BLACK = (0, 0, 0)
+GREEN = (0, 255, 0)
+
+# Création de l'arborescence des noeuds et cellules
+
+temporal_compression_level = None
+while temporal_compression_level == None:
+    try:
+        temporal_compression_level = int(input("Niveau de compression temporelle (0-..., 0=off, -1=toujours) : "))
+    except ValueError: pass
+
+cache = {}
+draw_cache = {}
+edit_cache = {}
+known_nodes = {}
+root_depth = 3
+root_x = -(2**(root_depth-1))
+root_y = -(2**(root_depth-1))
+root = newNode(root_depth)
+
+# Création de la fenêtre et autres
+
+window_size = (800, 600)
+MIN_SIZE = (400, 300)
+window = pygame.display.set_mode(window_size, pygame.RESIZABLE)
+pygame.display.set_caption("Conway's Game of Life")
+clock = pygame.time.Clock()
+
+font = pygame.font.SysFont("arial", 24)
+
+cell_size = 40
+simulating = False
+simulation_speed = 5
+MAX_SPEED = 100
+speed_button = RangeButton(50, 320)
+mouse = [0, 0, 0]  # Informations sur la souris : [durée du clic, x, y]
+LOOP_SPEED = 30
+simulation_loop_ticks = 0
+main_loop_ticks = 0
+scroll_x = 0
+scroll_y = 0
+keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT,
+                                 pygame.K_SPACE, pygame.K_LSHIFT, pygame.K_z, pygame.K_LCTRL,
+                                 pygame.K_x, pygame.K_c))
+brush = None
+last_matrix = None
+catalog_y = 0
+opening_catalog = False
+catalog_items = []
+copied_item = None
+for i in range(len(catalog)):
+    catalog_items.append(CatalogItem(i))
+copy_rect = None
+save_catalog = False
+
+running = True
+
+while running:
+        
+    # Boucle de simulation
+    
+    if simulating:
+        simulation_loop_ticks += 1
+        if simulation_loop_ticks >= MAX_SPEED / simulation_speed:
+            simulation_loop_ticks -= MAX_SPEED / simulation_speed
+            simulateCells()
+        
+    # Boucle principale
+    
+    main_loop_ticks += 1
+    
+    if main_loop_ticks >= MAX_SPEED / LOOP_SPEED:
+        main_loop_ticks -= MAX_SPEED / LOOP_SPEED
+
+        for key in keys:
+            if keys[key] > 0:
+                keys[key] += 1
+            
+        for event in pygame.event.get():  # Boucle d'évènements
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key in keys:
+                    keys[event.key] = 1
+            elif event.type == pygame.KEYUP:
+                if event.key in keys:
+                    keys[event.key] = 0
+            elif event.type == pygame.MOUSEWHEEL:
+                changeCellSize(event.y)
+            elif event.type == pygame.VIDEORESIZE:
+                if event.size[0] < MIN_SIZE[0] or event.size[1] < MIN_SIZE[1]:
+                    window = pygame.display.set_mode((max(event.size[0], MIN_SIZE[0]), max(event.size[1], MIN_SIZE[1])), pygame.RESIZABLE)
+                    
+        # Mise à jour des données
+        
+        if keys[pygame.K_z] == 1 and keys[pygame.K_LCTRL] > 0 and last_matrix:
+            simulating = False
+            root = last_matrix
+            
+        if keys[pygame.K_x] == 1 and keys[pygame.K_LCTRL] > 0:
+            root_depth = 3
+            root = newNode(root_depth)
+            
+        if keys[pygame.K_c] == 1 and keys[pygame.K_LCTRL] > 0:
+            cache.clear()
+            draw_cache.clear()
+            edit_cache.clear()
+
+        if keys[pygame.K_SPACE] == 1:
+            simulating = not simulating
+            if simulating:
+                last_matrix = root
+                opening_catalog = False
+                catalog_y = 0
+                copied_item = None
+                copy_rect = None
+                init_simulation = True
+
+        scroll_x += ((keys[pygame.K_RIGHT] > 0) - (keys[pygame.K_LEFT] > 0)) * (30 if keys[pygame.K_LSHIFT] > 0 else 14)
+        scroll_y += ((keys[pygame.K_UP] > 0) - (keys[pygame.K_DOWN] > 0)) * (-30 if keys[pygame.K_LSHIFT] > 0 else -14)
+                    
+        mouse[1], mouse[2] = pygame.mouse.get_pos()
+        if pygame.mouse.get_pressed()[0]:
+            mouse[0] += 1
+        else:
+            mouse[0] = 0
+        window_size = window.get_size()
+        
+        if mouse[0] > 0:
+            onMouseClick(*mouse)
+        else:
+            brush = None
+            if copy_rect:
+                addToCatalog(copy_rect)
+                copy_rect = None
+            
+        speed_button.update()
+        updateCatalog()
+                
+        # Affichage
+        
+        window.fill(WHITE)  # Efface l'écran
+        
+        if not simulating and cell_size > 2:
+            displayGrid(cell_size//15+1)
+        displayCells()
+        if copy_rect and not simulating:
+            displayCopyRect()    
+        displayCopiedItem()
+        displayStats()
+        if not simulating:
+            displayCatalog()
+        
+        pygame.display.flip() # Actualise l'écran
+    
+    clock.tick(MAX_SPEED)  # Limite la boucle à 'MAX_SPEED' ticks / seconde
+
+pygame.quit()  # Fermeture de la fenêtre
+
+if save_catalog:
+    with open("catalog.json", "w") as f:
+        dump(catalog, f, indent=4)
