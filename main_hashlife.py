@@ -432,7 +432,7 @@ def changeCellSize(value):  # Zoom / Dezoom
     global cell_size, scroll_x, scroll_y
     real_scroll_x = scroll_x / cell_size
     real_scroll_y = scroll_y / cell_size
-    cell_size = max(1, round(cell_size * 1.2**value))
+    cell_size = max(1, value)
     scroll_x = round(real_scroll_x*cell_size)
     scroll_y = round(real_scroll_y*cell_size)
     
@@ -575,7 +575,7 @@ scroll_x = 0
 scroll_y = 0
 keys = dict((key, 0) for key in (pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT,
                                  pygame.K_SPACE, pygame.K_LSHIFT, pygame.K_z, pygame.K_LCTRL,
-                                 pygame.K_x, pygame.K_c))
+                                 pygame.K_x, pygame.K_c, pygame.K_LALT))
 brush = None
 last_matrix = None
 catalog_y = 0
@@ -620,7 +620,7 @@ while running:
                 if event.key in keys:
                     keys[event.key] = 0
             elif event.type == pygame.MOUSEWHEEL:
-                changeCellSize(event.y)
+                changeCellSize(round(cell_size * 1.1**event.y))
             elif event.type == pygame.VIDEORESIZE:
                 if event.size[0] < MIN_SIZE[0] or event.size[1] < MIN_SIZE[1]:
                     window = pygame.display.set_mode((max(event.size[0], MIN_SIZE[0]), max(event.size[1], MIN_SIZE[1])), pygame.RESIZABLE)
@@ -639,6 +639,9 @@ while running:
             cache.clear()
             draw_cache.clear()
             edit_cache.clear()
+
+        if keys[pygame.K_z] == 1 and keys[pygame.K_LALT] > 0:
+            changeCellSize(cell_size-1 if keys[pygame.K_LSHIFT] > 0 else cell_size+1)
 
         if keys[pygame.K_SPACE] == 1:
             simulating = not simulating
