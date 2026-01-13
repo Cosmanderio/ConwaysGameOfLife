@@ -41,7 +41,6 @@ class RangeButton:  # Class du bouton de vitesse de simulation
             if mouse[0] > 0:
                 global simulation_speed
                 simulation_speed = max(1, min(MAX_SPEED, round((mouse[1]-window_size[0]//2+self.range//2)*MAX_SPEED/self.range)))
-                self.last_mouse_x = pygame.mouse.get_pos()[0]
             else:
                 self.is_clicked = False
         self.x = window_size[0]//2-self.range//2+round(simulation_speed/MAX_SPEED*self.range)
@@ -49,7 +48,6 @@ class RangeButton:  # Class du bouton de vitesse de simulation
     def onMouseClick(self, x, y):  # Clic de la souris
         if (self.x-x)**2+(self.y-y)**2 <= 64:
             self.is_clicked = True
-            self.last_mouse_x = x
             return True
         return False
     
