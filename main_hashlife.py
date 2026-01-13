@@ -22,17 +22,22 @@ et exécuter le script 'rle2json.py' en fournissant le chemin du fichier RLE qua
 
 import pygame
 from json import load, dump
+from math import floor
 
 pygame.init()  # Initiation de pygame
 
 
 class RangeButton:  # Class du bouton de vitesse de simulation
     
-    def __init__(self, y, button_range):
+    def __init__(self, y, button_range, set_target, get_target, offset_x, maxi):
         self.is_clicked = False
         self.range = button_range
         self.x = 0
         self.y = y
+        self.set_target = set_target
+        self.get_target = get_target
+        self.offset_x = offset_x
+        self.maxi = maxi
         
     def display(self):  # Affiche le bouton
         self.update()
@@ -41,17 +46,14 @@ class RangeButton:  # Class du bouton de vitesse de simulation
     def update(self):
         if self.is_clicked:
             if mouse[0] > 0:
-                global simulation_speed
-                simulation_speed = max(1, min(MAX_SPEED, round((mouse[1]-window_size[0]//2+self.range//2)*MAX_SPEED/self.range)))
-                self.last_mouse_x = pygame.mouse.get_pos()[0]
+                self.set_target(max(1, min(self.maxi, round((mouse[1]-window_size[0]//2+self.range//2-self.offset_x)*self.maxi/self.range))))
             else:
                 self.is_clicked = False
-        self.x = window_size[0]//2-self.range//2+round(simulation_speed/MAX_SPEED*self.range)
+        self.x = window_size[0]//2-self.range//2+self.offset_x+round(self.get_target()/self.maxi*self.range)
         
     def onMouseClick(self, x, y):  # Clic de la souris
         if (self.x-x)**2+(self.y-y)**2 <= 64:
             self.is_clicked = True
-            self.last_mouse_x = x
             return True
         return False
     
@@ -126,7 +128,7 @@ class CatalogItem:  # Class représentant les structures du catalogue
             
 class Node:
     
-    __slots__ = ('depth', 'a', 'b', 'c', 'd')
+    __slots__ = ('depth', 'a', 'b', 'c', 'd', 'result', 'hash', 'n')
     
     def __init__(self, depth, a, b, c, d):
         self.depth = depth
@@ -134,89 +136,70 @@ class Node:
         self.b = b
         self.c = c
         self.d = d
+        self.n = (a.n + b.n + c.n + d.n) if self.depth > 1 else (a + b + c + d)
+        self.result = None
+        self.hash = hash((id(self.a), id(self.b), id(self.c), id(self.d)))
             
     def evolve(self):  # Fonction de simulation utilisant l'algorithme Hashlife pour compresser l'espace et le temps
         
-        cached = cache.get(self)  # Si la node a déjà été calculée au moins 1 fois, on réutilise le résultat enregistré
-        if cached != None:
-           return cached
-        
-        if self.depth == 2:  # Simulation classique pour les plus petites nodes (4x4)
-            an = self.a.a + self.a.b + self.a.c + self.b.a + self.b.c + self.c.a + self.c.b + self.d.a
-            bn = self.a.b + self.b.a + self.a.d + self.c.b + self.d.a + self.b.b + self.b.d + self.d.b
-            cn = self.a.c + self.a.d + self.b.c + self.c.a + self.c.c + self.c.d + self.d.a + self.d.c
-            dn = self.a.d + self.b.c + self.b.d + self.c.b + self.c.d + self.d.b + self.d.c + self.d.d
-            a = 1 < an < 4 if self.a.d else an == 3
-            b = 1 < bn < 4 if self.b.c else bn == 3
-            c = 1 < cn < 4 if self.c.b else cn == 3
-            d = 1 < dn < 4 if self.d.a else dn == 3
-            result = newNode(1, a, b, c, d)
-            cache[self] = result
-            return result
-        
-        node1 = self.a
-        node2 = newNode(self.depth-1, self.a.b, self.b.a, self.a.d, self.b.c)
-        node3 = self.b
-        node4 = newNode(self.depth-1, self.a.c, self.a.d, self.c.a, self.c.b)
-        node5 = self.getCenterNode()
-        node6 = newNode(self.depth-1, self.b.c, self.b.d, self.d.a, self.d.b)
-        node7 = self.c
-        node8 = newNode(self.depth-1, self.c.b, self.d.a, self.c.d, self.d.c)
-        node9 = self.d
-        
-        node1Res = node1.evolve()
-        node2Res = node2.evolve()
-        node3Res = node3.evolve()
-        node4Res = node4.evolve()
-        node5Res = node5.evolve()
-        node6Res = node6.evolve()
-        node7Res = node7.evolve()
-        node8Res = node8.evolve()
-        node9Res = node9.evolve()
-        
-        intermediateNode1 = newNode(self.depth-1, node1Res, node2Res, node4Res, node5Res)
-        intermediateNode2 = newNode(self.depth-1, node2Res, node3Res, node5Res, node6Res)
-        intermediateNode3 = newNode(self.depth-1, node4Res, node5Res, node7Res, node8Res)
-        intermediateNode4 = newNode(self.depth-1, node5Res, node6Res, node8Res, node9Res)
-        
-        if self.depth-3 < temporal_compression_level or temporal_compression_level == -1:
-            result = newNode(self.depth-1,
-                        intermediateNode1.evolve(),
-                        intermediateNode2.evolve(),
-                        intermediateNode3.evolve(),
-                        intermediateNode4.evolve()
-                        )
-        else:
-            result = newNode(self.depth-1,
-                        intermediateNode1.getCenterNode(),
-                        intermediateNode2.getCenterNode(),
-                        intermediateNode3.getCenterNode(),
-                        intermediateNode4.getCenterNode()
-                        )
-        
-        cache[self] = result  # On stocke le résultat dans le cache pour la prochaine fois
-        return result
+        # Si la node a déjà été calculée au moins 1 fois, on réutilise le résultat enregistré
+        if self.result == None:
+            if self.n == 0:
+                self.result = getEmptyNode(self.depth-1)
+            elif self.depth == 2:  # Simulation classique pour les plus petites nodes (4x4)
+                an = self.a.a + self.a.b + self.a.c + self.b.a + self.b.c + self.c.a + self.c.b + self.d.a
+                bn = self.a.b + self.b.a + self.a.d + self.c.b + self.d.a + self.b.b + self.b.d + self.d.b
+                cn = self.a.c + self.a.d + self.b.c + self.c.a + self.c.c + self.c.d + self.d.a + self.d.c
+                dn = self.a.d + self.b.c + self.b.d + self.c.b + self.c.d + self.d.b + self.d.c + self.d.d
+                a = 1 < an < 4 if self.a.d else an == 3
+                b = 1 < bn < 4 if self.b.c else bn == 3
+                c = 1 < cn < 4 if self.c.b else cn == 3
+                d = 1 < dn < 4 if self.d.a else dn == 3
+                self.result = newNode(1, a, b, c, d)
+            else:
+                node1 = self.a
+                node2 = newNode(self.depth-1, self.a.b, self.b.a, self.a.d, self.b.c)
+                node3 = self.b
+                node4 = newNode(self.depth-1, self.a.c, self.a.d, self.c.a, self.c.b)
+                node5 = self.getCenterNode()
+                node6 = newNode(self.depth-1, self.b.c, self.b.d, self.d.a, self.d.b)
+                node7 = self.c
+                node8 = newNode(self.depth-1, self.c.b, self.d.a, self.c.d, self.d.c)
+                node9 = self.d
+                
+                node1Res = node1.evolve()
+                node2Res = node2.evolve()
+                node3Res = node3.evolve()
+                node4Res = node4.evolve()
+                node5Res = node5.evolve()
+                node6Res = node6.evolve()
+                node7Res = node7.evolve()
+                node8Res = node8.evolve()
+                node9Res = node9.evolve()
+                
+                intermediateNode1 = newNode(self.depth-1, node1Res, node2Res, node4Res, node5Res)
+                intermediateNode2 = newNode(self.depth-1, node2Res, node3Res, node5Res, node6Res)
+                intermediateNode3 = newNode(self.depth-1, node4Res, node5Res, node7Res, node8Res)
+                intermediateNode4 = newNode(self.depth-1, node5Res, node6Res, node8Res, node9Res)
+                
+                if (self.depth-3 < temporal_compression_level or temporal_compression_level == -1) and self is not root:
+                    self.result = newNode(self.depth-1,
+                                intermediateNode1.evolve(),
+                                intermediateNode2.evolve(),
+                                intermediateNode3.evolve(),
+                                intermediateNode4.evolve()
+                                )
+                else:
+                    self.result = newNode(self.depth-1,
+                                intermediateNode1.getCenterNode(),
+                                intermediateNode2.getCenterNode(),
+                                intermediateNode3.getCenterNode(),
+                                intermediateNode4.getCenterNode()
+                                )
+        return self.result
         
     def getCenterNode(self):  # Retourne la node centrale de celle-ci, centrée et 2 fois plus petite
         return newNode(self.depth-1, self.a.d, self.b.c, self.c.b, self.d.a)
-    
-    def getLivingCells(self):  # Renvoie chaque cellule vivante dans la node sous forme de coordonnées relatives à la node
-        cached = draw_cache.get(self)  # On utilise un cache pour obtenir le résultat de la fonction s'il a déjà été calculé
-        if cached != None:
-            return cached
-        
-        if self.depth == 1:
-            result = set((x, y) for x, y, cell in self.getSubNodes() if cell)
-            draw_cache[self] = result
-            return result
-        
-        result = set()
-        for dx, dy, node in self.getSubNodes():
-            for x, y in node.getLivingCells():
-                result.add((x+dx, y+dy))
-        
-        draw_cache[self] = result
-        return result
     
     def getSubNodes(self):  # Retourne la position relative de chaque sous-node et celle-ci
         half = 2**(self.depth-1)
@@ -261,9 +244,24 @@ class Node:
             if x+dx <= cx < x+dx+half and y+dy <= cy < y+dy+half:
                 return node.isLiving(x+dx, y+dy, cx, cy)
         return False
+    
+    def display(self, x, y, bx, by):  # Affichage de la node
+        if self.n == 0: return
+        if self.depth == 1 and min_depth_display == 0:
+            for dx, dy, cell in self.getSubNodes():
+                if cell:
+                    pygame.draw.rect(window, BLACK, (floor((x+dx)*cell_size)+bx, floor((y+dy)*cell_size)+by, display_node_size, display_node_size))
+        elif self.depth <= min_depth_display:
+            p = self.n / 2**self.depth
+            c = 0 if p > 0.8 else floor(255 - 255 * p / 0.8)
+            if c < 255:
+                pygame.draw.rect(window, (c,)*3, (floor(x*cell_size)+bx, floor(y*cell_size)+by, display_node_size, display_node_size))
+        else:
+            for dx, dy, node in self.getSubNodes():
+                node.display(x+dx, y+dy, bx, by)
         
     def __hash__(self):
-        return hash((id(self.a), id(self.b), id(self.c), id(self.d)))
+        return self.hash
     
     def __eq__(self, node):
         if not isinstance(node, Node): return False
@@ -281,18 +279,6 @@ class Node:
 # Définition des fonctions
 
 def newNode(depth, a=None, b=None, c=None, d=None):  # Vérifie si une node avec les mêmes propriétés existe et la retourne, sinon en créé une nouvelle
-    if a == None:
-        if depth == 1:
-            a = False
-            b = False
-            c = False
-            d = False
-        else:
-            node = newNode(depth-1)
-            a = node
-            b = node
-            c = node
-            d = node
     key = (a, b, c, d)
     node = known_nodes.get(key)
     if node == None:
@@ -301,37 +287,27 @@ def newNode(depth, a=None, b=None, c=None, d=None):  # Vérifie si une node avec
     return node
 
 
-def updateRootSize(default_x=0, default_y=0):  # Met à jour la taille de la node racine
-    global root, root_x, root_y, root_depth
-    min_x, max_x = min(default_x, 0), max(default_x, 0)
-    min_y, max_y, = min(default_y, 0), max(default_y, 0)
-    for x, y in root.getLivingCells():
-        x += root_x
-        y += root_y
-        if min_x > x:
-            min_x = x
-        if max_x < x:
-            max_x = x
-        if min_y > y:
-            min_y = y
-        if max_y < y:
-            max_y = y
+def updateRootSize():  # Met à jour la taille de la node racine
+    while any(node.n > 0 for node in (
+        root.a.d.a, root.a.d.b, root.a.d.c,
+        root.b.c.a, root.b.c.b, root.b.c.d,
+        root.c.b.a, root.c.b.c, root.c.b.d,
+        root.d.a.b, root.d.a.c, root.d.a.d)):
+        increaseRootSize()
     
-    width = max_x - min_x + 1
-    heigth = max_y - min_y + 1
     
-    while width > 2**(root_depth-3) or heigth > 2**(root_depth-3):
-        draw_cache.clear()
-        root_depth += 1
-        empty_node = newNode(root_depth-2)
-        root = newNode(root_depth,
-                    newNode(root_depth-1, empty_node, empty_node, empty_node, root.a),
-                    newNode(root_depth-1, empty_node, empty_node, root.b, empty_node),
-                    newNode(root_depth-1, empty_node, root.c, empty_node, empty_node),
-                    newNode(root_depth-1, root.d, empty_node, empty_node, empty_node)
-                    )
+def increaseRootSize():  # Augmente la profondeur (et donc la taille) de la racine de 1
+    global root, root_depth, root_x, root_y
+    root_depth += 1
+    empty_node = getEmptyNode(root_depth-2)
+    root = newNode(root_depth,
+                newNode(root_depth-1, empty_node, empty_node, empty_node, root.a),
+                newNode(root_depth-1, empty_node, empty_node, root.b, empty_node),
+                newNode(root_depth-1, empty_node, root.c, empty_node, empty_node),
+                newNode(root_depth-1, root.d, empty_node, empty_node, empty_node)
+                )
     root_x = - 2**(root_depth-1)
-    root_y = - 2**(root_depth-1)
+    root_y = root_x
 
 
 def simulateCells():  # Simule les cellules à partir de la node racine
@@ -347,21 +323,20 @@ def simulateCells():  # Simule les cellules à partir de la node racine
 
 
 def displayGrid(line_width):  # Affiche la grille
-    for x in range(-((scroll_x-window_size[0]//2)%cell_size), window_size[0]+1, cell_size):
+    for x in range(-((scroll_x-window_size[0]//2)%round(cell_size)), window_size[0]+1, round(cell_size)):
         pygame.draw.line(window, GRAY, (x, 0), (x, window_size[1]), line_width)
-    for y in range(-((scroll_y-window_size[1]//2)%cell_size), window_size[1]+1, cell_size):
+    for y in range(-((scroll_y-window_size[1]//2)%round(cell_size)), window_size[1]+1, round(cell_size)):
         pygame.draw.line(window, GRAY, (0, y), (window_size[0], y), line_width)
         
 
 def displayCells():  # Affiche les cellules
     bx = window_size[0]//2-scroll_x
     by = window_size[1]//2-scroll_y
-    for x, y in root.getLivingCells():
-        pygame.draw.rect(window, BLACK, ((x+root_x)*cell_size+bx, (y+root_y)*cell_size+by, cell_size, cell_size))
+    root.display(root_x, root_y, bx, by)
                 
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
     global brush, opening_catalog, copied_item, copy_rect
-    if nb_clicks == 1 and speed_button.onMouseClick(x, y):
+    if nb_clicks == 1 and (speed_button.onMouseClick(x, y) or clearness_button.onMouseClick(x, y)):
         return
     if simulating: return
     if opening_catalog:
@@ -381,8 +356,8 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
                     else:
                         if catalog_item.instant_paste:
                             w, h = catalog_item.surface.get_size()
-                            i = scroll_y // cell_size
-                            j = scroll_x // cell_size
+                            i = floor(scroll_y / cell_size)
+                            j = floor(scroll_x / cell_size)
                             pasteCatalogItem(catalog_item.index, j-w//2, i-h//2)
                         else:
                             copied_item = catalog_item
@@ -392,8 +367,8 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
     elif mouse[0] == 1 and mouse[2] >= window_size[1]-16:
         opening_catalog = True
         return
-    i = (y+scroll_y-window_size[1]//2) // cell_size
-    j = (x+scroll_x-window_size[0]//2) // cell_size
+    i = floor((y+scroll_y-window_size[1]//2) / cell_size)
+    j = floor((x+scroll_x-window_size[0]//2) / cell_size)
     if copied_item:
         if nb_clicks == 1:
             w, h = copied_item.surface.get_size()
@@ -414,27 +389,35 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
         
 
 def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
-    pygame.draw.rect(window, BLACK, (window_size[0]//2-210, -40, 420, 110), border_radius=40)
+    pygame.draw.rect(window, BLACK, (window_size[0]//2-270, -40, 540, 110), border_radius=40)
     txt = font.render(f"Vitesse de simulation : {simulation_speed} ticks/s", True, WHITE)
     txt_size = txt.get_size()
-    window.blit(txt, (window_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
-    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-160, 48, 320, 5), border_radius=2)
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2-120, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-220, 48, 200, 5), border_radius=2)
     speed_button.display()
+    txt = font.render(f"Netteté : {clearness} %", True, WHITE)
+    txt_size = txt.get_size()
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2+120, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2+40, 48, 160, 5), border_radius=2)
+    clearness_button.display()
     
 
 def setCell(x, y, value, check_size=True):  # Affecte une valeur à une cellule
     global root
     if check_size:
-        updateRootSize(x, y)
+        maxi = max(abs(x), abs(y))
+        while maxi > 2**(root_depth-3):
+            increaseRootSize()
     root = root.setCell(root_x, root_y, x, y, value)
     
 def changeCellSize(value):  # Zoom / Dezoom
-    global cell_size, scroll_x, scroll_y
-    real_scroll_x = scroll_x / cell_size
-    real_scroll_y = scroll_y / cell_size
-    cell_size = max(1, value)
-    scroll_x = round(real_scroll_x*cell_size)
-    scroll_y = round(real_scroll_y*cell_size)
+    global zoom, scroll_x, scroll_y
+    real_scroll_x = scroll_x / display_node_size
+    real_scroll_y = scroll_y / display_node_size
+    zoom = value
+    updateCellSize()
+    scroll_x = round(real_scroll_x*display_node_size)
+    scroll_y = round(real_scroll_y*display_node_size)
     
     
 def updateCatalog():  # Actualise la position du catalogue
@@ -475,18 +458,19 @@ def pasteCatalogItem(index, x, y):  # Colle un élément du catalogue sur la gri
     min_y_axis = min(y_axis)
     max_x = max(abs(cell_x+x-min_x_axis) for cell_x, _ in structure)
     max_y = max(abs(cell_y+y-min_y_axis) for _, cell_y in structure)
-    updateRootSize(max_x, max_y)
+    setCell(max_x, max_y, False)
     for cell_x, cell_y in structure:
         setCell(cell_x+x-min_x_axis, cell_y+y-min_y_axis, True, False)
+    edit_cache.clear()
         
 
 def displayCopiedItem():  # Affiche la structure copiée du catalogue
     if copied_item:
-        surface = pygame.transform.scale_by(copied_item.surface, cell_size)
+        surface = pygame.transform.scale_by(copied_item.surface, floor(cell_size))
         surface.set_alpha(160)
         w, h = copied_item.surface.get_size()
-        x = ((mouse[1]+scroll_x-window_size[0]//2) // cell_size - w//2) * cell_size - scroll_x + window_size[0]//2
-        y = ((mouse[2]+scroll_y-window_size[1]//2) // cell_size - h//2) * cell_size - scroll_y + window_size[1]//2
+        x = floor((floor((mouse[1]+scroll_x-window_size[0]//2) / cell_size) - w//2) * cell_size) - scroll_x + window_size[0]//2
+        y = floor((floor((mouse[2]+scroll_y-window_size[1]//2) / cell_size) - h//2) * cell_size) - scroll_y + window_size[1]//2
         window.blit(surface, (x, y))
         
 
@@ -512,10 +496,37 @@ def addToCatalog(copy_rect):  # Ajoute la zone sélectionnée au catalogue
     
 def displayCopyRect():  # Affiche le rectangle de sélection
     rect = absRect(copy_rect)
-    surface = pygame.Surface(((rect[2]+1)*cell_size, (rect[3]+1)*cell_size), pygame.SRCALPHA)
+    surface = pygame.Surface((floor((rect[2]+1)*cell_size), floor((rect[3]+1)*cell_size)), pygame.SRCALPHA)
     surface.fill(GREEN)
     surface.set_alpha(120)
-    window.blit(surface, (window_size[0]//2-scroll_x+rect[0]*cell_size, window_size[1]//2-scroll_y+rect[1]*cell_size))
+    window.blit(surface, (window_size[0]//2-scroll_x+floor(rect[0]*cell_size), window_size[1]//2-scroll_y+floor(rect[1]*cell_size)))
+    
+    
+def getEmptyNode(depth):  # Retourne une node avec la profondeur demandée
+    while depth > len(empty_nodes):
+        empty_nodes.append(newNode(len(empty_nodes)+1, *[empty_nodes[-1]]*4))
+    return empty_nodes[depth-1]
+
+
+def updateCellSize():  # Met à jour cell_size à partir du zoom et du niveau de netteté
+    global display_node_size, min_depth_display, cell_size
+    min_depth_display = floor((1-clearness/100) * (root_depth+1))
+    display_node_size = floor(2**min_depth_display * zoom)
+    while display_node_size < 1:
+        min_depth_display += 1
+        display_node_size = floor(2**min_depth_display * zoom)
+    cell_size = display_node_size / 2**min_depth_display
+    
+    
+def setSimulationSpeed(v):
+    global simulation_speed
+    simulation_speed = v
+    
+
+def setClearness(v):
+    global clearness
+    clearness = v
+    updateCellSize()
   
 # Chargement des données            
 
@@ -543,14 +554,13 @@ while temporal_compression_level == None:
         temporal_compression_level = int(input("Niveau de compression temporelle (0-..., 0=off, -1=toujours) : "))
     except ValueError: pass
 
-cache = {}
-draw_cache = {}
 edit_cache = {}
 known_nodes = {}
-root_depth = 3
+empty_nodes = [newNode(1, False, False, False, False)]
+root_depth = 4
 root_x = -(2**(root_depth-1))
 root_y = -(2**(root_depth-1))
-root = newNode(root_depth)
+root = getEmptyNode(root_depth)
 
 # Création de la fenêtre et autres
 
@@ -560,13 +570,18 @@ window = pygame.display.set_mode(window_size, pygame.RESIZABLE)
 pygame.display.set_caption("Conway's Game of Life")
 clock = pygame.time.Clock()
 
-font = pygame.font.SysFont("arial", 24)
+font = pygame.font.SysFont("arial", 18)
 
-cell_size = 40
+zoom = 40
+display_node_size = zoom
+cell_size = display_node_size
+min_depth_display = 0
+clearness = 100
 simulating = False
 simulation_speed = 5
 MAX_SPEED = 100
-speed_button = RangeButton(50, 320)
+speed_button = RangeButton(50, 200, setSimulationSpeed, lambda: simulation_speed, -120, MAX_SPEED)
+clearness_button = RangeButton(50, 160, setClearness, lambda: clearness, 120, 100)
 mouse = [0, 0, 0]  # Informations sur la souris : [durée du clic, x, y]
 LOOP_SPEED = 30
 simulation_loop_ticks = 0
@@ -620,7 +635,7 @@ while running:
                 if event.key in keys:
                     keys[event.key] = 0
             elif event.type == pygame.MOUSEWHEEL:
-                changeCellSize(round(cell_size * 1.1**event.y))
+                changeCellSize(zoom * 1.1**event.y)
             elif event.type == pygame.VIDEORESIZE:
                 if event.size[0] < MIN_SIZE[0] or event.size[1] < MIN_SIZE[1]:
                     window = pygame.display.set_mode((max(event.size[0], MIN_SIZE[0]), max(event.size[1], MIN_SIZE[1])), pygame.RESIZABLE)
@@ -632,16 +647,11 @@ while running:
             root = last_matrix
             
         if keys[pygame.K_x] == 1 and keys[pygame.K_LCTRL] > 0:
-            root_depth = 3
-            root = newNode(root_depth)
+            root_depth = 4
+            root = getEmptyNode(root_depth)
             
         if keys[pygame.K_c] == 1 and keys[pygame.K_LCTRL] > 0:
-            cache.clear()
-            draw_cache.clear()
             edit_cache.clear()
-
-        if keys[pygame.K_z] == 1 and keys[pygame.K_LALT] > 0:
-            changeCellSize(cell_size-1 if keys[pygame.K_LSHIFT] > 0 else cell_size+1)
 
         if keys[pygame.K_SPACE] == 1:
             simulating = not simulating
@@ -672,14 +682,15 @@ while running:
                 copy_rect = None
             
         speed_button.update()
+        clearness_button.update()
         updateCatalog()
                 
         # Affichage
         
         window.fill(WHITE)  # Efface l'écran
         
-        if not simulating and cell_size > 2:
-            displayGrid(cell_size//15+1)
+        if not simulating and min_depth_display == 0 and cell_size > 3:
+            displayGrid(floor(cell_size/15)+1)
         displayCells()
         if copy_rect and not simulating:
             displayCopyRect()    
