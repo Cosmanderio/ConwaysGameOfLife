@@ -236,7 +236,9 @@ class Node:
         edit_cache[(self, cx-x, cy-y, value)] = result
         return result
     
-    def isLiving(self, x, y, cx, cy):  # Retourne True si la cellule en cx, cy est vivante sinon False 
+    def isLiving(self, x, y, cx, cy):  # Retourne True si la cellule en cx, cy est vivante sinon False
+        if self.n == 0:
+            return False
         if self.depth == 1:
             return self.getSubNodeFromXY(cx-x, cy-y)
         half = 2**(self.depth-1)
@@ -278,7 +280,7 @@ class Node:
 
 # Définition des fonctions
 
-def newNode(depth, a=None, b=None, c=None, d=None):  # Vérifie si une node avec les mêmes propriétés existe et la retourne, sinon en créé une nouvelle
+def newNode(depth, a, b, c, d):  # Vérifie si une node avec les mêmes propriétés existe et la retourne, sinon en créé une nouvelle
     key = (a, b, c, d)
     node = known_nodes.get(key)
     if node == None:
@@ -292,7 +294,11 @@ def updateRootSize():  # Met à jour la taille de la node racine
         root.a.d.a, root.a.d.b, root.a.d.c,
         root.b.c.a, root.b.c.b, root.b.c.d,
         root.c.b.a, root.c.b.c, root.c.b.d,
-        root.d.a.b, root.d.a.c, root.d.a.d)):
+        root.d.a.b, root.d.a.c, root.d.a.d,
+        root.a.a, root.a.b, root.a.c,
+        root.b.a, root.b.b, root.b.d,
+        root.c.a, root.c.c, root.c.d,
+        root.d.b, root.d.c, root.d.d)):
         increaseRootSize()
     
     
