@@ -16,13 +16,18 @@ Lien vers l'article utilisé pour implémenter le Hashlife : https://www.dev-min
 
 Pour rajouter des structures au catalogue depuis internet, télécharger un fichier RLE sur un site (exemple : https://conwaylife.appspot.com/library)
 et exécuter le script 'rle2json.py' en fournissant le chemin du fichier RLE quand demandé.
+
+Pour charger une structure vraiment massive, glisser le fichier RLE directement sur ce fichier.
 """
 
 # Importation des librairies
 
 import pygame
 from json import load, dump
-from math import floor, ceil
+from math import floor, log2, ceil
+from sys import argv
+from collections import defaultdict
+from os import path
 
 pygame.init()  # Initiation de pygame
 
@@ -124,7 +129,120 @@ class CatalogItem:  # Class représentant les structures du catalogue
             txt = self.FONT.render("Aucun aperçu", True, (100, 125, 145))
             txt_size = txt.get_size()
             self.preview.blit(txt, (self.PREVIEW_SIZE//2-txt_size[0]//2, self.PREVIEW_SIZE//2-txt_size[1]//2))
-            
+
+
+class RLE_Loader:  # Class contenant les fonctions permettant de charger une structure massive depuis le format RLE de façon optimale
+    
+    # Tout le code contenu dans cette class a été créé par ChatGPT
+
+    def parse_rle(rle_text):
+        rows = defaultdict(list)
+
+        x = y = 0
+        count = 0
+        width = height = 0
+
+        for c in rle_text:
+            if c.isdigit():
+                count = count * 10 + int(c)
+                continue
+
+            n = count if count else 1
+            count = 0
+
+            if c == 'o':  # cellules vivantes
+                rows[y].append((x, x + n))
+                x += n
+
+            elif c == 'b':  # cellules mortes (on ignore)
+                x += n
+
+            elif c == '$':  # nouvelle ligne
+                y += n
+                x = 0
+
+            elif c == '!':
+                break
+
+            width = max(width, x)
+            height = max(height, y + 1)
+
+        return rows, width, height
+    
+    def build_node(depth, x0, y0, rows):
+        if not rows:
+            return getEmptyNode(depth)
+        
+        def cell_alive(x, y, rows):
+            runs = rows.get(y)
+            if not runs:
+                return False
+
+            for x1, x2 in runs:
+                if x1 <= x < x2:
+                    return True
+            return False
+
+        if depth == 1:
+            # construire un 2×2
+            return newNode(
+                1,
+                cell_alive(x0,     y0,     rows),
+                cell_alive(x0 + 1, y0,     rows),
+                cell_alive(x0,     y0 + 1, rows),
+                cell_alive(x0 + 1, y0 + 1, rows),
+            )
+
+        half = 1 << (depth - 1)
+
+        nw_rows = {}
+        ne_rows = {}
+        sw_rows = {}
+        se_rows = {}
+
+        for y, runs in rows.items():
+            if y < y0 or y >= y0 + 2 * half:
+                continue
+
+            if y < y0 + half:
+                target = (nw_rows, ne_rows)
+            else:
+                target = (sw_rows, se_rows)
+
+            for x1, x2 in runs:
+                if x2 <= x0 or x1 >= x0 + 2 * half:
+                    continue
+
+                if x1 < x0 + half:
+                    target[0].setdefault(y, []).append((x1, min(x2, x0 + half)))
+                if x2 > x0 + half:
+                    target[1].setdefault(y, []).append((max(x1, x0 + half), x2))
+
+        return newNode(
+            depth,
+            RLE_Loader.build_node(depth - 1, x0, y0, nw_rows),
+            RLE_Loader.build_node(depth - 1, x0 + half, y0, ne_rows),
+            RLE_Loader.build_node(depth - 1, x0, y0 + half, sw_rows),
+            RLE_Loader.build_node(depth - 1, x0 + half, y0 + half, se_rows),
+        )
+        
+    def load(rle_text):
+        # 1) Parser le RLE → runs horizontaux
+        rows, width, height = RLE_Loader.parse_rle(rle_text)
+
+        # 2) Taille minimale du carré englobant
+        size = max(width, height)
+        if size <= 1:
+            return getEmptyNode(1)
+
+        # 3) Profondeur Hashlife (2^depth ≥ size)
+        depth = ceil(log2(size))
+        if depth < 1:
+            depth = 1
+
+        # 4) Construire la node racine bottom-up
+        return RLE_Loader.build_node(depth, 0, 0, rows)
+
             
 class Node:
     
@@ -275,7 +393,7 @@ class Node:
     
     def __repr__(self):
         if self.depth == 1:
-            return f"Node 1x1 a={self.a} b={self.b} c={self.c} d={self.d}"
+            return f"Node 2x2 a={self.a} b={self.b} c={self.c} d={self.d}"
         return f"Node {2**self.depth}x{2**self.depth} depth={self.depth}"
              
 
@@ -566,10 +684,15 @@ while temporal_compression_level == None:
 edit_cache = {}
 known_nodes = {}
 empty_nodes = [newNode(1, False, False, False, False)]
-root_depth = 4
+if len(argv) > 1 and path.exists(argv[1]):
+    with open(argv[1], "r") as f:
+        root = RLE_Loader.load(f.read())
+        root_depth = root.depth
+else:
+    root_depth = 4
+    root = getEmptyNode(root_depth)
 root_x = -(2**(root_depth-1))
 root_y = -(2**(root_depth-1))
-root = getEmptyNode(root_depth)
 
 # Création de la fenêtre et autres
 
