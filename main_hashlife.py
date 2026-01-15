@@ -22,7 +22,7 @@ et exécuter le script 'rle2json.py' en fournissant le chemin du fichier RLE qua
 
 import pygame
 from json import load, dump
-from math import floor
+from math import floor, ceil
 
 pygame.init()  # Initiation de pygame
 
@@ -247,8 +247,9 @@ class Node:
                 return node.isLiving(x+dx, y+dy, cx, cy)
         return False
     
-    def display(self, x, y, bx, by):  # Affichage de la node
+    def display(self, x, y, bx, by, window_rect):  # Affichage de la node
         if self.n == 0: return
+        if not window_rect.colliderect(x, y, 2**self.depth, 2**self.depth): return
         if self.depth == 1 and min_depth_display == 0:
             for dx, dy, cell in self.getSubNodes():
                 if cell:
@@ -260,7 +261,7 @@ class Node:
                 pygame.draw.rect(window, (c,)*3, (floor(x*cell_size)+bx, floor(y*cell_size)+by, display_node_size, display_node_size))
         else:
             for dx, dy, node in self.getSubNodes():
-                node.display(x+dx, y+dy, bx, by)
+                node.display(x+dx, y+dy, bx, by, window_rect)
         
     def __hash__(self):
         return self.hash
@@ -338,8 +339,10 @@ def displayGrid(line_width):  # Affiche la grille
 def displayCells():  # Affiche les cellules
     bx = window_size[0]//2-scroll_x
     by = window_size[1]//2-scroll_y
-    root.display(root_x, root_y, bx, by)
-                
+    window_rect = pygame.Rect(floor(-bx/cell_size), floor(-by/cell_size), ceil(window_size[0]/cell_size)+1, ceil(window_size[1]/cell_size)+1)
+    root.display(root_x, root_y, bx, by, window_rect)
+    
+    
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
     global brush, opening_catalog, copied_item, copy_rect
     if nb_clicks == 1 and (speed_button.onMouseClick(x, y) or clearness_button.onMouseClick(x, y)):
