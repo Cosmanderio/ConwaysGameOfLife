@@ -42,7 +42,7 @@ class RangeButton:  # Class du bouton de vitesse de simulation
         self.set_target = set_target
         self.get_target = get_target
         self.offset_x = offset_x
-        self.maxi = maxi
+        self.maxi = (lambda: maxi) if isinstance(maxi, int) else maxi
         
     def display(self):  # Affiche le bouton
         self.update()
@@ -51,10 +51,10 @@ class RangeButton:  # Class du bouton de vitesse de simulation
     def update(self):
         if self.is_clicked:
             if mouse[0] > 0:
-                self.set_target(max(1, min(self.maxi, round((mouse[1]-window_size[0]//2+self.range//2-self.offset_x)*self.maxi/self.range))))
+                self.set_target(max(1, min(self.maxi(), floor((mouse[1]-window_size[0]//2+self.range//2-self.offset_x)*(self.maxi()-1)/self.range+0.5)+1)))
             else:
                 self.is_clicked = False
-        self.x = window_size[0]//2-self.range//2+self.offset_x+round(self.get_target()/self.maxi*self.range)
+        self.x = window_size[0]//2-self.range//2+self.offset_x+round((self.get_target()-1)/(self.maxi()-1)*self.range)
         
     def onMouseClick(self, x, y):  # Clic de la souris
         if (self.x-x)**2+(self.y-y)**2 <= 64:
@@ -255,15 +255,16 @@ class Node:
         self.c = c
         self.d = d
         self.n = (a.n + b.n + c.n + d.n) if self.depth > 1 else (a + b + c + d)
-        self.result = None
+        self.result = {}
         self.hash = hash((id(self.a), id(self.b), id(self.c), id(self.d)))
             
     def evolve(self):  # Fonction de simulation utilisant l'algorithme Hashlife pour compresser l'espace et le temps
         
         # Si la node a déjà été calculée au moins 1 fois, on réutilise le résultat enregistré
-        if self.result == None:
+        result = self.result.get(temporal_compression_level)
+        if result == None:
             if self.n == 0:
-                self.result = getEmptyNode(self.depth-1)
+                result = getEmptyNode(self.depth-1)
             elif self.depth == 2:  # Simulation classique pour les plus petites nodes (4x4)
                 an = self.a.a + self.a.b + self.a.c + self.b.a + self.b.c + self.c.a + self.c.b + self.d.a
                 bn = self.a.b + self.b.a + self.a.d + self.c.b + self.d.a + self.b.b + self.b.d + self.d.b
@@ -273,7 +274,7 @@ class Node:
                 b = 1 < bn < 4 if self.b.c else bn == 3
                 c = 1 < cn < 4 if self.c.b else cn == 3
                 d = 1 < dn < 4 if self.d.a else dn == 3
-                self.result = newNode(1, a, b, c, d)
+                result = newNode(1, a, b, c, d)
             else:
                 node1 = self.a
                 node2 = newNode(self.depth-1, self.a.b, self.b.a, self.a.d, self.b.c)
@@ -301,20 +302,21 @@ class Node:
                 intermediateNode4 = newNode(self.depth-1, node5Res, node6Res, node8Res, node9Res)
                 
                 if (self.depth-3 < temporal_compression_level or temporal_compression_level == -1) and self is not root:
-                    self.result = newNode(self.depth-1,
+                    result = newNode(self.depth-1,
                                 intermediateNode1.evolve(),
                                 intermediateNode2.evolve(),
                                 intermediateNode3.evolve(),
                                 intermediateNode4.evolve()
                                 )
                 else:
-                    self.result = newNode(self.depth-1,
+                    result = newNode(self.depth-1,
                                 intermediateNode1.getCenterNode(),
                                 intermediateNode2.getCenterNode(),
                                 intermediateNode3.getCenterNode(),
                                 intermediateNode4.getCenterNode()
                                 )
-        return self.result
+            self.result[temporal_compression_level] = result
+        return result
         
     def getCenterNode(self):  # Retourne la node centrale de celle-ci, centrée et 2 fois plus petite
         return newNode(self.depth-1, self.a.d, self.b.c, self.c.b, self.d.a)
@@ -367,19 +369,20 @@ class Node:
     
     def display(self, x, y, bx, by, window_rect):  # Affichage de la node
         if self.n == 0: return
-        if not window_rect.colliderect(x, y, 2**self.depth, 2**self.depth): return
+        size = 2**self.depth
+        if not window_rect.colliderect(x*size+root_x, y*size+root_y, size, size): return
         if self.depth == 1 and min_depth_display == 0:
             for dx, dy, cell in self.getSubNodes():
                 if cell:
-                    pygame.draw.rect(window, BLACK, (floor((x+dx)*cell_size)+bx, floor((y+dy)*cell_size)+by, display_node_size, display_node_size))
+                    pygame.draw.rect(window, BLACK, ((2*x+dx)*displayed_node_size+bx, (2*y+dy)*displayed_node_size+by, displayed_node_size, displayed_node_size))
         elif self.depth <= min_depth_display:
             p = self.n / 2**self.depth
             c = 0 if p > 0.8 else floor(255 - 255 * p / 0.8)
             if c < 255:
-                pygame.draw.rect(window, (c,)*3, (floor(x*cell_size)+bx, floor(y*cell_size)+by, display_node_size, display_node_size))
+                pygame.draw.rect(window, (c,)*3, (x*displayed_node_size+bx, y*displayed_node_size+by, displayed_node_size, displayed_node_size))
         else:
             for dx, dy, node in self.getSubNodes():
-                node.display(x+dx, y+dy, bx, by, window_rect)
+                node.display(2*x+min(dx, 1), 2*y+min(dy, 1), bx, by, window_rect)
         
     def __hash__(self):
         return self.hash
@@ -394,7 +397,7 @@ class Node:
     def __repr__(self):
         if self.depth == 1:
             return f"Node 2x2 a={self.a} b={self.b} c={self.c} d={self.d}"
-        return f"Node {2**self.depth}x{2**self.depth} depth={self.depth}"
+        return f"Node {2**self.depth}x{2**self.depth} depth={self.depth} n={self.n}"
              
 
 # Définition des fonctions
@@ -448,22 +451,24 @@ def simulateCells():  # Simule les cellules à partir de la node racine
 
 
 def displayGrid(line_width):  # Affiche la grille
-    for x in range(-((scroll_x-window_size[0]//2)%round(cell_size)), window_size[0]+1, round(cell_size)):
+    for x in range(-((scroll_x-window_size[0]//2)%displayed_node_size), window_size[0]+1, displayed_node_size):
         pygame.draw.line(window, GRAY, (x, 0), (x, window_size[1]), line_width)
-    for y in range(-((scroll_y-window_size[1]//2)%round(cell_size)), window_size[1]+1, round(cell_size)):
+    for y in range(-((scroll_y-window_size[1]//2)%displayed_node_size), window_size[1]+1, displayed_node_size):
         pygame.draw.line(window, GRAY, (0, y), (window_size[0], y), line_width)
         
 
 def displayCells():  # Affiche les cellules
     bx = window_size[0]//2-scroll_x
     by = window_size[1]//2-scroll_y
+    half = 2**(root_depth-min_depth_display-1) * displayed_node_size
+    cell_size = displayed_node_size / 2**min_depth_display
     window_rect = pygame.Rect(floor(-bx/cell_size), floor(-by/cell_size), ceil(window_size[0]/cell_size)+1, ceil(window_size[1]/cell_size)+1)
-    root.display(root_x, root_y, bx, by, window_rect)
+    root.display(0, 0, bx-half, by-half, window_rect)
     
     
 def onMouseClick(nb_clicks, x, y):  # Clic de souris
     global brush, opening_catalog, copied_item, copy_rect
-    if nb_clicks == 1 and (speed_button.onMouseClick(x, y) or clearness_button.onMouseClick(x, y)):
+    if nb_clicks == 1 and (speed_button.onMouseClick(x, y) or clearness_button.onMouseClick(x, y) or temporal_button.onMouseClick(x, y)):
         return
     if simulating: return
     if opening_catalog:
@@ -483,8 +488,8 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
                     else:
                         if catalog_item.instant_paste:
                             w, h = catalog_item.surface.get_size()
-                            i = floor(scroll_y / cell_size)
-                            j = floor(scroll_x / cell_size)
+                            i = floor(scroll_y / (displayed_node_size / 2**min_depth_display))
+                            j = floor(scroll_x / (displayed_node_size / 2**min_depth_display))
                             pasteCatalogItem(catalog_item.index, j-w//2, i-h//2)
                         else:
                             copied_item = catalog_item
@@ -494,8 +499,8 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
     elif mouse[0] == 1 and mouse[2] >= window_size[1]-16:
         opening_catalog = True
         return
-    i = floor((y+scroll_y-window_size[1]//2) / cell_size)
-    j = floor((x+scroll_x-window_size[0]//2) / cell_size)
+    i = floor((y+scroll_y-window_size[1]//2) / (displayed_node_size / 2**min_depth_display))
+    j = floor((x+scroll_x-window_size[0]//2) / (displayed_node_size / 2**min_depth_display))
     if copied_item:
         if nb_clicks == 1:
             w, h = copied_item.surface.get_size()
@@ -516,16 +521,21 @@ def onMouseClick(nb_clicks, x, y):  # Clic de souris
         
 
 def displayStats():  # Affiche le bandeau de statistique en haut de l'écran
-    pygame.draw.rect(window, BLACK, (window_size[0]//2-270, -40, 540, 110), border_radius=40)
+    pygame.draw.rect(window, BLACK, (window_size[0]//2-400, -40, 800, 110), border_radius=40)
     txt = font.render(f"Vitesse de simulation : {simulation_speed} ticks/s", True, WHITE)
     txt_size = txt.get_size()
-    window.blit(txt, (window_size[0]//2-txt_size[0]//2-120, 20-txt_size[1]//2))
-    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-220, 48, 200, 5), border_radius=2)
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2-250, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-340, 40, 180, 5), border_radius=2)
     speed_button.display()
+    txt = font.render(f"Compression temporelle : {2**temporal_compression_level} gen/tick", True, WHITE)
+    txt_size = txt.get_size()
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2+250, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2+160, 40, 180, 5), border_radius=2)
+    temporal_button.display()
     txt = font.render(f"Netteté : {clearness} %", True, WHITE)
     txt_size = txt.get_size()
-    window.blit(txt, (window_size[0]//2-txt_size[0]//2+120, 20-txt_size[1]//2))
-    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2+40, 48, 160, 5), border_radius=2)
+    window.blit(txt, (window_size[0]//2-txt_size[0]//2, 20-txt_size[1]//2))
+    pygame.draw.rect(window, LIGHT_GRAY, (window_size[0]//2-80, 40, 160, 5), border_radius=2)
     clearness_button.display()
     
 
@@ -539,12 +549,12 @@ def setCell(x, y, value, check_size=True):  # Affecte une valeur à une cellule
     
 def changeCellSize(value):  # Zoom / Dezoom
     global zoom, scroll_x, scroll_y
-    real_scroll_x = scroll_x / display_node_size
-    real_scroll_y = scroll_y / display_node_size
+    real_scroll_x = scroll_x / displayed_node_size
+    real_scroll_y = scroll_y / displayed_node_size
     zoom = value
-    updateCellSize()
-    scroll_x = round(real_scroll_x*display_node_size)
-    scroll_y = round(real_scroll_y*display_node_size)
+    updateDisplayedNodeSize()
+    scroll_x = round(real_scroll_x*displayed_node_size)
+    scroll_y = round(real_scroll_y*displayed_node_size)
     
     
 def updateCatalog():  # Actualise la position du catalogue
@@ -593,6 +603,7 @@ def pasteCatalogItem(index, x, y):  # Colle un élément du catalogue sur la gri
 
 def displayCopiedItem():  # Affiche la structure copiée du catalogue
     if copied_item:
+        cell_size = displayed_node_size / 2**min_depth_display
         surface = pygame.transform.scale_by(copied_item.surface, floor(cell_size))
         surface.set_alpha(160)
         w, h = copied_item.surface.get_size()
@@ -623,6 +634,7 @@ def addToCatalog(copy_rect):  # Ajoute la zone sélectionnée au catalogue
     
 def displayCopyRect():  # Affiche le rectangle de sélection
     rect = absRect(copy_rect)
+    cell_size = displayed_node_size / 2**min_depth_display
     surface = pygame.Surface((floor((rect[2]+1)*cell_size), floor((rect[3]+1)*cell_size)), pygame.SRCALPHA)
     surface.fill(GREEN)
     surface.set_alpha(120)
@@ -635,14 +647,13 @@ def getEmptyNode(depth):  # Retourne une node avec la profondeur demandée
     return empty_nodes[depth-1]
 
 
-def updateCellSize():  # Met à jour cell_size à partir du zoom et du niveau de netteté
-    global display_node_size, min_depth_display, cell_size
+def updateDisplayedNodeSize():  # Met à jour displayed_node_size à partir du zoom et du niveau de netteté
+    global displayed_node_size, min_depth_display
     min_depth_display = floor((1-clearness/100) * (root_depth+1))
-    display_node_size = floor(2**min_depth_display * zoom)
-    while display_node_size < 1:
+    displayed_node_size = floor(2**min_depth_display * zoom)
+    while displayed_node_size < 1:
         min_depth_display += 1
-        display_node_size = floor(2**min_depth_display * zoom)
-    cell_size = display_node_size / 2**min_depth_display
+        displayed_node_size = floor(2**min_depth_display * zoom)
     
     
 def setSimulationSpeed(v):
@@ -653,7 +664,12 @@ def setSimulationSpeed(v):
 def setClearness(v):
     global clearness
     clearness = v
-    updateCellSize()
+    updateDisplayedNodeSize()
+    
+    
+def setTemporalCompressionLevel(v):
+    global temporal_compression_level
+    temporal_compression_level = v-1
   
 # Chargement des données            
 
@@ -675,12 +691,6 @@ GREEN = (0, 255, 0)
 
 # Création de l'arborescence des noeuds et cellules
 
-temporal_compression_level = None
-while temporal_compression_level == None:
-    try:
-        temporal_compression_level = int(input("Niveau de compression temporelle (0-..., 0=off, -1=toujours) : "))
-    except ValueError: pass
-
 edit_cache = {}
 known_nodes = {}
 empty_nodes = [newNode(1, False, False, False, False)]
@@ -696,26 +706,27 @@ root_y = -(2**(root_depth-1))
 
 # Création de la fenêtre et autres
 
-window_size = (800, 600)
+window_size = (860, 600)
 MIN_SIZE = (400, 300)
 window = pygame.display.set_mode(window_size, pygame.RESIZABLE)
 pygame.display.set_caption("Conway's Game of Life")
 clock = pygame.time.Clock()
 
-font = pygame.font.SysFont("arial", 18)
+font = pygame.font.SysFont("arial", 16)
 
 zoom = 40
-display_node_size = zoom
-cell_size = display_node_size
+displayed_node_size = zoom
 min_depth_display = 0
 clearness = 100
+temporal_compression_level = 0
 simulating = False
 simulation_speed = 5
-MAX_SPEED = 100
-speed_button = RangeButton(50, 200, setSimulationSpeed, lambda: simulation_speed, -120, MAX_SPEED)
-clearness_button = RangeButton(50, 160, setClearness, lambda: clearness, 120, 100)
+MAX_SPEED = 160
+speed_button = RangeButton(42, 180, setSimulationSpeed, lambda: simulation_speed, -250, MAX_SPEED)
+clearness_button = RangeButton(42, 160, setClearness, lambda: clearness, 0, 100)
+temporal_button = RangeButton(42, 180, setTemporalCompressionLevel, lambda: temporal_compression_level+1, 250, lambda: root_depth)
 mouse = [0, 0, 0]  # Informations sur la souris : [durée du clic, x, y]
-LOOP_SPEED = 30
+LOOP_SPEED = 24
 simulation_loop_ticks = 0
 main_loop_ticks = 0
 scroll_x = 0
@@ -781,6 +792,7 @@ while running:
         if keys[pygame.K_x] == 1 and keys[pygame.K_LCTRL] > 0:
             root_depth = 4
             root = getEmptyNode(root_depth)
+            temporal_compression_level = min(temporal_compression_level, 3)
             
         if keys[pygame.K_c] == 1 and keys[pygame.K_LCTRL] > 0:
             edit_cache.clear()
@@ -815,14 +827,15 @@ while running:
             
         speed_button.update()
         clearness_button.update()
+        temporal_button.update()
         updateCatalog()
                 
         # Affichage
         
         window.fill(WHITE)  # Efface l'écran
         
-        if not simulating and min_depth_display == 0 and cell_size > 3:
-            displayGrid(floor(cell_size/15)+1)
+        if not simulating and min_depth_display == 0 and zoom > 3:
+            displayGrid(floor(zoom/15)+1)
         displayCells()
         if copy_rect and not simulating:
             displayCopyRect()    
