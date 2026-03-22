@@ -255,13 +255,14 @@ class Node:
         self.c = c
         self.d = d
         self.n = (a.n + b.n + c.n + d.n) if self.depth > 1 else (a + b + c + d)
-        self.result = {}
+        self.result = [None] * (self.depth - 1)
         self.hash = hash((id(self.a), id(self.b), id(self.c), id(self.d)))
             
     def evolve(self):  # Fonction de simulation utilisant l'algorithme Hashlife pour compresser l'espace et le temps
         
         # Si la node a déjà été calculée au moins 1 fois, on réutilise le résultat enregistré
-        result = self.result.get(temporal_compression_level)
+        self_temporal_compression = min(temporal_compression_level, len(self.result)-1)
+        result = self.result[self_temporal_compression]
         if result == None:
             if self.n == 0:
                 result = getEmptyNode(self.depth-1)
@@ -315,7 +316,7 @@ class Node:
                                 intermediateNode3.getCenterNode(),
                                 intermediateNode4.getCenterNode()
                                 )
-            self.result[temporal_compression_level] = result
+            self.result[self_temporal_compression] = result
         return result
         
     def getCenterNode(self):  # Retourne la node centrale de celle-ci, centrée et 2 fois plus petite
